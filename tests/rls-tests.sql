@@ -90,3 +90,43 @@ begin
   for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_results(test, ok) values (r[i], b[i]); end loop;
 end $$;
 select test, ok from t_results order by n;
+
+-- ===== Attachments (job_files + bucket job-files), added 2026-10-20. Same pattern: run, read the table, nothing is kept. =====
+create temp table if not exists t_results (n serial, test text, ok boolean);
+truncate t_results;
+do $$
+declare c int; jid uuid; err text; r text[] := array[]::text[]; b boolean[] := array[]::boolean[];
+begin
+  begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000b2","role":"authenticated"}', true);
+  insert into public.jobs (client) values ('file test') returning id into jid;
+  insert into public.job_files (job_id, path, name, size, mime, uploaded_by) values (jid, jid::text || '/x-a.pdf', 'a.pdf', 10, 'application/pdf', '00000000-0000-4000-8000-0000000000a1');
+  select count(*) into c from public.job_files where job_id = jid and uploaded_by = '00000000-0000-4000-8000-0000000000b2';
+  r := array_append(r, 'office: add file row, uploader forced to self'); b := array_append(b, c = 1);
+  begin insert into public.job_files (job_id, path, name, size) values (jid, 'other/x-b.pdf', 'b.pdf', 1); err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'office: file path must be under its job'); b := array_append(b, err = 'blocked');
+  select count(*) into c from public.job_history where job_id = jid and action = 'file-insert';
+  r := array_append(r, 'file upload is logged in history'); b := array_append(b, c = 1);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c3","role":"authenticated"}', true);
+  select count(*) into c from public.job_files;
+  r := array_append(r, 'depot: sees no files'); b := array_append(b, c = 0);
+  begin insert into public.job_files (job_id, path, name, size) values (jid, jid::text || '/x-c.pdf', 'c.pdf', 1); err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'depot: cannot add file'); b := array_append(b, err = 'blocked');
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000d4","role":"authenticated"}', true);
+  select count(*) into c from public.job_files;
+  r := array_append(r, 'pending: sees no files'); b := array_append(b, c = 0);
+  select count(*) into c from storage.objects where bucket_id = 'job-files';
+  r := array_append(r, 'pending: sees no stored objects'); b := array_append(b, c = 0);
+  perform set_config('role', 'anon', true);
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  begin select count(*) into c from public.job_files; err := 'allowed ' || c; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'anon: cannot read files (' || err || ')'); b := array_append(b, err = 'blocked' or err = 'allowed 0');
+  raise exception 'rollback';
+  exception when others then
+    perform set_config('role', 'postgres', true);
+    if sqlerrm <> 'rollback' then r := array_append(r, 'SUITE CRASHED: ' || sqlerrm); b := array_append(b, false); end if;
+  end;
+  for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_results(test, ok) values (r[i], b[i]); end loop;
+end $$;
+select test, ok from t_results order by n;

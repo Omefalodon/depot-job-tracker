@@ -17,8 +17,14 @@ var supabase = { createClient() {
     };
     return b;
   }
+  const call = (st) => window.__db(JSON.stringify(st)).then(r => JSON.parse(r));
+  const storage = { from(bucket) { return {
+    upload(path, file, opts) { return call({ op: "upload", bucket, path, size: file.size, contentType: opts && opts.contentType }); },
+    remove(paths) { return call({ op: "remove", bucket, paths }); },
+    createSignedUrl(path, ttl, opts) { return call({ op: "sign", bucket, path, download: opts && opts.download }); }
+  }; } };
   return {
-    from,
+    from, storage,
     auth: {
       async signInWithPassword({ email, password }) { const r = JSON.parse(await window.__db(JSON.stringify({ op: "login", email, password }))); if (r.error) return r; session = { user: r.user }; fire("SIGNED_IN"); return { data: { session }, error: null }; },
       async signOut() { await window.__db(JSON.stringify({ op: "logout" })); session = null; fire("SIGNED_OUT"); return { error: null }; },

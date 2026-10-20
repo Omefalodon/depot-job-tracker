@@ -17,12 +17,20 @@ on, the database returns nothing (see `tests/rls-tests.sql`). No passwords, secr
 data are in this repo. **Never commit the `service_role` / secret key.**
 
 ## Roles
-| Role | Jobs, notes | Prices | Users screen |
+| Role | Jobs, notes | Prices, attachments | Users screen |
 |---|---|---|---|
 | admin | read / write | read / write | yes |
 | office | read / write | read / write | no |
 | depot (future) | read / write | **hidden** | no |
 | not approved yet | nothing | nothing | no |
+
+## Attachments
+Files dropped on a job (or on its card) go to the **private** Storage bucket `job-files`, under
+`<job id>/<random>-<name>`; `job_files` holds one row per file with the real name, size and who
+added it. Files open through links that expire after 5 minutes. Limits: 25 MB per file; PDF,
+images, Office files, csv/txt, e-mails (.msg/.eml) and zip only (enforced by the bucket, not just
+the page). Free plan storage: 1 GB in total. Attachments are hidden from the depot role because
+quotes and invoices can carry prices. Deleting a job deletes its files.
 
 New logins are created in the Supabase dashboard (Authentication › Users › Add user) and start
 switched off; an admin switches them on in the app's **Users** screen.
@@ -34,10 +42,12 @@ recorded in `job_history` by a trigger, so the editor can show who changed what.
 ## Tests
 - **Self-test in the page:** ⋯ › Run self-test (logic: container check digit, dates, Excel writer…).
 - **Database rules:** paste `tests/rls-tests.sql` into the Supabase SQL editor; every row must say
-  `ok = true` (21 checks; nothing is left behind).
+  `ok = true` (21 + 8 attachment checks, two result tables; nothing is left behind).
 - **UI with two users:** `tests/ui/run.mjs` drives the page in Chromium with a stand-in for
   Supabase (`tests/ui/fake-supabase.js`): login, live updates between two users, edit conflicts,
-  day notes, drag & drop, approving a user, hiding prices, Excel export, delete, sign out.
+  day notes, drag & drop, attachments (pick, drop on a card, open, download, remove, queued on a
+  new job, removed with the job, hidden from depot), approving a user, hiding prices, Excel export,
+  delete, sign out.
   ```
   npm i playwright          # once
   python3 -m http.server 8765 &

@@ -112,6 +112,14 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
 .checks .ci input[type=checkbox]{width:auto}
 .checks .ci input[type=text]{flex:1}
 .checks .ci.done input[type=text]{text-decoration:line-through;color:var(--muted)}
+.drop{border:2px dashed var(--border);border-radius:8px;padding:12px;text-align:center;color:var(--muted);font-size:13px}
+.drop.dragover{border-color:var(--accent);background:var(--accent-weak);color:var(--accent)}
+.drop button.link{border:0;background:none;padding:0;color:var(--accent);text-decoration:underline;cursor:pointer;font:inherit}
+.flist .fi{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px}
+.flist .fi a{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
+.flist .fi .s{color:var(--muted);font-size:11px;white-space:nowrap}
+.flist .fi.pending a{color:var(--muted)}
+.card.filedrop{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--accent-weak)}
 .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
 .toast.show{opacity:1}
 mark{background:#ffe58f;color:#000;border-radius:2px}
@@ -222,6 +230,12 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
           <div id="checkList"></div>
           <button type="button" id="btnAddCheck">+ Add step</button>
         </div>
+        <div class="wide price-only">
+          <label>Attachments</label>
+          <div class="drop" id="drop">Drop files here or <button type="button" class="link" id="btnPick">choose files</button><br><span style="font-size:11px">PDF, photos, Word, Excel, e-mails (.msg/.eml), zip · up to 25 MB each</span></div>
+          <div class="flist" id="fileList"></div>
+          <input type="file" id="filePick" multiple hidden>
+        </div>
         <div class="wide" id="jobMeta"></div>
       </div>
     </div>
@@ -281,6 +295,33 @@ const DJ = (() => {
       (job.checklist || []).map(c => c.text).join(" ").toLowerCase();
     return q.split(/\s+/).every(w => hay.includes(w));
   }
+
+  // Attachments: the storage bucket only accepts these types (see the job_attachments migration).
+  const FILE_MAX = 25 * 1024 * 1024;
+  const FILE_TYPES = {
+    pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
+    heic: "image/heic", tif: "image/tiff", tiff: "image/tiff",
+    doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    csv: "text/csv", txt: "text/plain", msg: "application/vnd.ms-outlook", eml: "message/rfc822", zip: "application/zip"
+  };
+  function fileType(name) { const m = /\.([A-Za-z0-9]+)$/.exec(String(name || "")); return m ? FILE_TYPES[m[1].toLowerCase()] || "" : ""; }
+  function fileProblem(f) {
+    if (!fileType(f.name)) return "file type not allowed";
+    if (f.size > FILE_MAX) return "bigger than 25 MB";
+    if (!f.size) return "empty file";
+    return "";
+  }
+  // storage keys must be plain ASCII; the real name is kept in job_files.name
+  function storageName(name) {
+    const base = String(name || "").split(/[\\/]/).pop();
+    const dot = base.lastIndexOf("."), ext = dot > 0 ? base.slice(dot).toLowerCase().replace(/[^.a-z0-9]/g, "") : "";
+    const stem = (dot > 0 ? base.slice(0, dot) : base).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80);
+    return (stem || "file") + ext;
+  }
+  function fmtSize(n) { n = +n || 0; return n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
 
   function newId() {
     try { return crypto.randomUUID(); } catch (e) { return "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -437,7 +478,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX };
 })();
 
 /* ================= Supabase ================= */
@@ -448,7 +489,7 @@ if (!window.supabase) { document.body.innerHTML = "<p style=\"padding:20px\">The
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 let me = null;            // my profile row
 let people = {};          // id -> profile
-let jobs = [], dayNotes = {}, online = true, loaded = false;
+let jobs = [], dayNotes = {}, files = {}, online = true, loaded = false; // files: job id -> attachments
 const dirtyNotes = new Set();
 function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch (e) { return {}; } }
 function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) { } }
@@ -460,13 +501,15 @@ function fail(what, error) { console.error(what, error); toast(what + ": " + (er
 
 const DB = {
   async loadAll() {
-    const [j, pr, n, pp] = await Promise.all([
+    const [j, pr, n, pp, fl] = await Promise.all([
       sb.from("jobs").select("*").order("job_date", { ascending: true, nullsFirst: false }).limit(5000),
       seesPrices() ? sb.from("job_prices").select("job_id,price") : Promise.resolve({ data: [] }),
       sb.from("day_notes").select("day,note"),
-      sb.from("profiles").select("id,email,full_name,role,active")
+      sb.from("profiles").select("id,email,full_name,role,active"),
+      seesPrices() ? sb.from("job_files").select("id,job_id,path,name,size,mime,uploaded_at,uploaded_by").order("uploaded_at", { ascending: true }) : Promise.resolve({ data: [] })
     ]);
-    const err = j.error || pr.error || n.error || pp.error; if (err) throw err;
+    const err = j.error || pr.error || n.error || pp.error || fl.error; if (err) throw err;
+    files = {}; for (const f of fl.data) (files[f.job_id] = files[f.job_id] || []).push(f);
     const prices = {}; for (const r of pr.data) prices[r.job_id] = r;
     jobs = j.data.map(r => DJ.fromRow(r, prices[r.id]));
     const keep = {}; for (const d of dirtyNotes) keep[d] = dayNotes[d];
@@ -502,7 +545,26 @@ const DB = {
     const r = await sb.from("jobs").update({ job_date: job.date || null, job_time: job.time || null, status: job.status }).eq("id", job.id).select();
     if (r.error) throw r.error;
   },
-  async deleteJob(id) { const r = await sb.from("jobs").delete().eq("id", id); if (r.error) throw r.error; },
+  async deleteJob(id) {
+    const fs = files[id] || [];
+    if (fs.length) { const s = await sb.storage.from("job-files").remove(fs.map(f => f.path)); if (s.error) throw s.error; }
+    const r = await sb.from("jobs").delete().eq("id", id); if (r.error) throw r.error;
+  },
+  async uploadFile(jobId, file) {
+    const path = jobId + "/" + DJ.newId() + "-" + DJ.storageName(file.name), mime = DJ.fileType(file.name);
+    const up = await sb.storage.from("job-files").upload(path, file, { contentType: mime, upsert: false });
+    if (up.error) throw up.error;
+    const r = await sb.from("job_files").insert({ job_id: jobId, path, name: String(file.name).slice(0, 200), size: file.size, mime }).select();
+    if (r.error) { await sb.storage.from("job-files").remove([path]); throw r.error; }
+  },
+  async fileUrl(f, asDownload) {
+    const r = await sb.storage.from("job-files").createSignedUrl(f.path, 300, asDownload ? { download: f.name } : undefined);
+    if (r.error) throw r.error; return r.data.signedUrl;
+  },
+  async deleteFile(f) {
+    const s = await sb.storage.from("job-files").remove([f.path]); if (s.error) throw s.error;
+    const r = await sb.from("job_files").delete().eq("id", f.id); if (r.error) throw r.error;
+  },
   async saveNote(day, text) {
     const r = text.trim() ? await sb.from("day_notes").upsert({ day, note: text.slice(0, 4000) }) : await sb.from("day_notes").delete().eq("day", day);
     if (r.error) throw r.error;
@@ -534,6 +596,7 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_prices" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "day_notes" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "job_files" }, reloadSoon)
     .subscribe(status => { if (status === "SUBSCRIBED") { setOnline(true); reloadSoon(); } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setOnline(false); });
 }
 
@@ -573,7 +636,10 @@ function hl(text, q) {
 }
 function fmtDate(s) { if (!s) return "No date"; const d = DJ.parseYmd(s); return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" }); }
 function pill(st) { return '<span class="pill p-' + st + '">' + DJ.STATUS_LABEL[st] + '</span>'; }
-function progress(j) { const n = j.checklist.length; if (!n) return ""; const d = j.checklist.filter(c => c.done).length; return '<span class="prog">☑ ' + d + '/' + n + '</span>'; }
+function progress(j) {
+  const nf = (files[j.id] || []).length, clip = nf ? ' <span class="prog" title="Attachments">📎 ' + nf + '</span>' : "";
+  const n = j.checklist.length; if (!n) return clip; const d = j.checklist.filter(c => c.done).length; return '<span class="prog">☑ ' + d + '/' + n + '</span>' + clip;
+}
 function cardHtml(j, q, draggable, compact) {
   if (compact) {
     const line = [j.time, j.client, j.truckPlate, j.pieces ? j.pieces + " pcs" : ""].filter(Boolean).join(" · ");
@@ -740,9 +806,10 @@ function wireDrag(sel, apply) {
   const main = $("#main");
   main.querySelectorAll('.card[draggable]').forEach(c => c.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; }));
   main.querySelectorAll(sel).forEach(col => {
-    col.addEventListener("dragover", e => { e.preventDefault(); col.classList.add("dragover"); });
+    col.addEventListener("dragover", e => { if (hasFiles(e)) return; e.preventDefault(); col.classList.add("dragover"); });
     col.addEventListener("dragleave", () => col.classList.remove("dragover"));
     col.addEventListener("drop", e => {
+      if (hasFiles(e)) return;
       e.preventDefault(); col.classList.remove("dragover");
       const job = jobs.find(j => j.id === e.dataTransfer.getData("text/plain")); if (!job) return;
       const before = { date: job.date, time: job.time, status: job.status };
@@ -764,6 +831,7 @@ function render() {
   ({ all: renderAll, week: renderWeek, board: renderBoard, projects: renderProjects, users: renderUsers }[ui.view] || renderBoard)();
   renderSide();
   refreshDatalists();
+  if ($("#dlg").open) renderFiles();
 }
 
 function refreshDatalists() {
@@ -817,7 +885,7 @@ function renderUsers() {
 }
 
 /* ================= Job editor ================= */
-let editing = null, editingFrom = null, draftChecks = [], saving = false;
+let editing = null, editingFrom = null, draftChecks = [], pendingFiles = [], saving = false;
 function openEditor(id, preset) {
   const j = id ? jobs.find(x => x.id === id) : null;
   editing = j ? j.id : null;
@@ -829,15 +897,88 @@ function openEditor(id, preset) {
   $("#f_status").value = base.status || "open";
   editingFrom = j ? j.updated : null;
   draftChecks = (j ? j.checklist : []).map(c => ({ ...c }));
+  pendingFiles = [];
   $("#jobMeta").innerHTML = j ? '<div class="meta">Added by ' + esc(personName(j.createdBy)) + ' · last changed by ' + esc(personName(j.updatedBy)) + ', ' + esc(new Date(j.updated).toLocaleString()) + ' · <a href="#" id="showHist">show changes</a></div><div class="hist" id="hist" hidden></div>' : "";
   const sh = $("#showHist"); if (sh) sh.onclick = async ev => { ev.preventDefault(); const h = $("#hist"); h.hidden = false; h.textContent = "Loading…";
-    try { const rows = await DB.history(j.id); h.innerHTML = rows.map(r => '<div>' + esc(new Date(r.changed_at).toLocaleString()) + ' · <b>' + esc(personName(r.changed_by)) + '</b> · ' + esc(r.action === "update" ? "changed " + (DJ.changedFields(r.old_row, r.new_row).join(", ") || "nothing visible") : r.action.replace("price-", "price ")) + '</div>').join("") || "No changes recorded."; }
+    try { const rows = await DB.history(j.id); h.innerHTML = rows.map(r => '<div>' + esc(new Date(r.changed_at).toLocaleString()) + ' · <b>' + esc(personName(r.changed_by)) + '</b> · ' + esc(r.action === "update" ? "changed " + (DJ.changedFields(r.old_row, r.new_row).join(", ") || "nothing visible") : r.action === "file-insert" ? "attached " + ((r.new_row || {}).name || "a file") : r.action === "file-delete" ? "removed attachment " + ((r.old_row || {}).name || "") : r.action.replace("price-", "price ")) + '</div>').join("") || "No changes recorded."; }
     catch (e) { h.textContent = "Couldn't load changes."; } };
   renderChecks();
+  renderFiles();
   ["shippingContainer", "hctContainer"].forEach(k => $("#h_" + k).textContent = DJ.containerWarning($("#f_" + k).value));
   $("#dlg").showModal();
   $("#f_client").focus();
 }
+/* ---------- attachments ---------- */
+const hasFiles = e => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+function renderFiles() {
+  if (!seesPrices()) { $("#fileList").innerHTML = ""; return; }
+  const list = editing ? (files[editing] || []) : pendingFiles;
+  $("#fileList").innerHTML = list.map((f, i) => editing
+    ? '<div class="fi"><a href="#" data-open="' + i + '" title="Open">' + esc(f.name) + '</a><span class="s">' + esc(DJ.fmtSize(f.size)) + ' · ' + esc(personName(f.uploaded_by)) + ', ' + esc(new Date(f.uploaded_at).toLocaleDateString()) + '</span><button type="button" class="ghost" data-dl="' + i + '" title="Download" aria-label="Download">⬇</button><button type="button" class="ghost" data-fdel="' + i + '" title="Remove" aria-label="Remove attachment">✕</button></div>'
+    : '<div class="fi pending"><a href="#" data-open="-1">' + esc(f.name) + '</a><span class="s">' + esc(DJ.fmtSize(f.size)) + ' · uploads when you save</span><button type="button" class="ghost" data-fdel="' + i + '" aria-label="Remove attachment">✕</button></div>').join("");
+}
+function checkFiles(list) {
+  const ok = [], bad = [];
+  for (const f of Array.from(list || [])) { const p = DJ.fileProblem(f); if (p) bad.push(f.name + " (" + p + ")"); else ok.push(f); }
+  if (bad.length) toast("Not added: " + bad.join(", "));
+  return ok;
+}
+async function uploadMany(jobId, list) {
+  let done = 0; const failed = [];
+  {
+    for (const f of list) {
+      toast("Uploading " + (done + failed.length + 1) + " of " + list.length + " · " + f.name);
+      try { await DB.uploadFile(jobId, f); done++; } catch (e) { console.error("upload", e); failed.push(f.name + (e && e.message ? " (" + e.message + ")" : "")); }
+    }
+  }
+  if (failed.length) toast("Not uploaded: " + failed.join(", ")); else if (done) toast(done === 1 ? "File attached" : done + " files attached");
+  await reload();
+}
+async function openFile(f, asDownload) {
+  const w = asDownload ? null : window.open("", "_blank"); // opened now, while the click still counts, so pop-up blockers allow it
+  try {
+    const url = await DB.fileUrl(f, asDownload);
+    if (w) { w.opener = null; w.location.href = url; }
+    else { const a = document.createElement("a"); a.href = url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); }
+  } catch (e) { if (w) w.close(); fail("Couldn't open the file", e); }
+}
+function addFiles(list) {
+  const ok = checkFiles(list); if (!ok.length) return;
+  if (editing) uploadMany(editing, ok); else { pendingFiles.push(...ok); renderFiles(); }
+}
+$("#btnPick").onclick = () => $("#filePick").click();
+$("#filePick").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
+$("#drop").addEventListener("dragover", e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; $("#drop").classList.add("dragover"); });
+$("#drop").addEventListener("dragleave", () => $("#drop").classList.remove("dragover"));
+$("#drop").addEventListener("drop", e => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); $("#drop").classList.remove("dragover"); addFiles(e.dataTransfer.files); });
+$("#fileList").addEventListener("click", async e => {
+  const t = e.target.closest("[data-open],[data-dl],[data-fdel]"); if (!t) return; e.preventDefault();
+  const list = editing ? (files[editing] || []) : pendingFiles;
+  if (t.dataset.fdel != null) {
+    const f = list[+t.dataset.fdel]; if (!f) return;
+    if (!editing) { pendingFiles.splice(+t.dataset.fdel, 1); renderFiles(); return; }
+    if (!confirm("Remove “" + f.name + "” from this job for everyone?")) return;
+    try { await DB.deleteFile(f); toast("Attachment removed"); await reload(); } catch (err) { fail("Not removed", err); }
+    return;
+  }
+  const f = list[+(t.dataset.open != null ? t.dataset.open : t.dataset.dl)];
+  if (f && editing) openFile(f, t.dataset.dl != null);
+});
+// Drop files straight onto a job card; anywhere else a dropped file is ignored instead of the browser opening it.
+function clearFileDrop(except) { document.querySelectorAll(".card.filedrop").forEach(c => c !== except && c.classList.remove("filedrop")); }
+document.addEventListener("dragover", e => {
+  if (!hasFiles(e)) return; e.preventDefault();
+  const c = !$("#dlg").open && seesPrices() ? e.target.closest(".card[data-id]") : null;
+  clearFileDrop(c); if (c) c.classList.add("filedrop");
+  e.dataTransfer.dropEffect = c ? "copy" : "none";
+});
+document.addEventListener("dragleave", e => { if (!e.relatedTarget) clearFileDrop(null); });
+document.addEventListener("drop", e => {
+  if (!hasFiles(e)) return; e.preventDefault(); clearFileDrop(null);
+  const c = !$("#dlg").open && seesPrices() ? e.target.closest(".card[data-id]") : null; if (!c) return;
+  const ok = checkFiles(e.dataTransfer.files); if (ok.length) uploadMany(c.dataset.id, ok);
+});
+
 function renderChecks() {
   $("#checkList").innerHTML = draftChecks.map((c, i) => '<div class="ci' + (c.done ? ' done' : '') + '"><input type="checkbox" data-i="' + i + '"' + (c.done ? ' checked' : '') + ' aria-label="Done"><input type="text" data-i="' + i + '" value="' + esc(c.text) + '" maxlength="300" placeholder="Step"><button type="button" class="ghost" data-del="' + i + '" aria-label="Remove step">✕</button></div>').join("");
 }
@@ -862,7 +1003,9 @@ $("#jobForm").addEventListener("submit", async e => {
       if (!confirm("Someone else changed this job while you had it open" + (cur ? " (" + personName(cur.updatedBy) + ")" : "") + ".\n\nOK = save your version over theirs\nCancel = keep theirs (your edits are dropped)")) { $("#dlg").close(); await reload(); return; }
       r = await DB.saveJob(Object.assign({}, data, { id: editing }), null, true);
     }
+    const queued = !editing && seesPrices() ? pendingFiles.splice(0) : [];
     $("#dlg").close(); toast("Saved"); await reload();
+    if (queued.length && r.row) await uploadMany(r.row.id, queued);
   } catch (err) { fail("Not saved", err); }
   finally { saving = false; $("#btnSave").disabled = false; }
 });
@@ -947,6 +1090,10 @@ function selfTest() {
   const back = DJ.fromRow({ id: "x", shipping_container: "A", weight: 7, pieces: null, job_date: "2026-10-20", job_time: "09:15:00", status: "done", checklist: [], client: "", hct_container: "", truck_plate: "", transporter: "", cargo_type: "", project: "", ref: "", notes: "" }, { price: 99.9 });
   ok("fromRow maps back", back.time === "09:15" && back.weight === "7" && back.pieces === "" && back.price === "99.9" && back.status === "done");
   ok("changedFields", DJ.changedFields({ status: "open", client: "a" }, { status: "done", client: "a" }).join() === "Status");
+  ok("file type by extension", DJ.fileType("Invoice.PDF") === "application/pdf" && DJ.fileType("mail.msg") === "application/vnd.ms-outlook" && DJ.fileType("x.exe") === "" && DJ.fileType("noext") === "");
+  ok("file checks", DJ.fileProblem({ name: "a.pdf", size: 10 }) === "" && DJ.fileProblem({ name: "a.html", size: 10 }) !== "" && DJ.fileProblem({ name: "a.pdf", size: DJ.FILE_MAX + 1 }) !== "" && DJ.fileProblem({ name: "a.pdf", size: 0 }) !== "");
+  ok("storage name is plain ASCII", DJ.storageName("Τιμολόγιο Μάιος 2026.PDF") === "2026.pdf" && DJ.storageName("C:\\x\\my file (1).xlsx") === "my_file_1.xlsx" && DJ.storageName("ΑΒΓ") === "file" && /^[A-Za-z0-9_.-]+$/.test(DJ.storageName("../../etc/passwd")));
+  ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
   return { total, failed };
 }
 

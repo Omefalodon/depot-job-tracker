@@ -8,7 +8,9 @@ const db = { profiles: [
   { id: "u-george", email: "george@test", full_name: "George", role: "admin", active: true },
   { id: "u-maria", email: "maria@test", full_name: "Maria", role: "office", active: true },
   { id: "u-new", email: "new@test", full_name: "", role: "office", active: false }],
-  jobs: [], job_prices: [], day_notes: [], job_history: [] };
+  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [] };
+const objects = {}; // storage bucket job-files: path -> {size, contentType}
+const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'text/plain', 'application/vnd.ms-outlook'];
 const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id" };
 const sessions = new Map(); const pages = [];
 let seq = 0; const now = () => new Date(Date.now() + (seq++)).toISOString();
@@ -18,15 +20,25 @@ function handle(page, st) {
   if (st.op === "logout") { sessions.delete(page); return {}; }
   const uid = sessions.get(page), r = role(uid), T = db[st.table];
   if (!uid) return { data: null, error: { message: "not signed in" } };
-  const allowed = st.table === "profiles" ? true : st.table === "job_prices" ? (r === "admin" || r === "office") : !!r;
+  const pr = r === "admin" || r === "office";
+  if (st.op === "upload") {
+    if (!pr) return { data: null, error: { message: "new row violates row-level security policy" } };
+    if (!db.jobs.some(j => j.id === st.path.split('/')[0])) return { data: null, error: { message: "no such job folder" } };
+    if (!ALLOWED.includes(st.contentType)) return { data: null, error: { message: "mime type not supported" } };
+    if (objects[st.path]) return { data: null, error: { message: "The resource already exists" } };
+    objects[st.path] = { size: st.size, contentType: st.contentType }; return { data: { path: st.path }, error: null };
+  }
+  if (st.op === "remove") { if (pr) for (const k of st.paths) delete objects[k]; return { data: [], error: null }; }
+  if (st.op === "sign") { if (!pr || !objects[st.path]) return { data: null, error: { message: "Object not found" } }; return { data: { signedUrl: "https://files.test/sign/" + st.path + (st.download ? "?download=" + encodeURIComponent(st.download) : "") }, error: null }; }
+  const allowed = st.table === "profiles" ? true : (st.table === "job_prices" || st.table === "job_files") ? pr : !!r;
   let rows = T.filter(row => st.filters.every(([k, v]) => String(row[k]) === String(v)));
   if (st.table === "profiles" && !r) rows = rows.filter(x => x.id === uid);
   if (!allowed) return st.op === "select" ? { data: [], error: null } : { data: null, error: { message: "permission denied" } };
   let out = rows; let changed = false;
-  if (st.op === "insert") { const row = Object.assign({ id: "j" + (seq++) }, st.row, { created_at: now(), updated_at: now(), created_by: uid, updated_by: uid }); T.push(row); out = [row]; changed = true; }
+  if (st.op === "insert") { const row = Object.assign({ id: "j" + (seq++) }, st.row, st.table === "job_files" ? { uploaded_at: now(), uploaded_by: uid } : { created_at: now(), updated_at: now(), created_by: uid, updated_by: uid }); T.push(row); out = [row]; changed = true; }
   if (st.op === "upsert") { const k = pk[st.table]; let ex = T.find(x => x[k] === st.row[k]); if (ex) Object.assign(ex, st.row, { updated_at: now(), updated_by: uid }); else { ex = Object.assign({}, st.row, { updated_at: now(), updated_by: uid }); T.push(ex); } out = [ex]; changed = true; }
   if (st.op === "update") { if (st.table === "profiles" && r !== "admin") { delete st.row.role; delete st.row.active; } rows.forEach(x => Object.assign(x, st.row, st.table === "profiles" ? {} : { updated_at: now(), updated_by: uid })); changed = rows.length > 0; }
-  if (st.op === "delete") { for (const x of rows) T.splice(T.indexOf(x), 1); if (st.table === "jobs") for (const x of rows) db.job_prices = db.job_prices.filter(p => p.job_id !== x.id); changed = true; }
+  if (st.op === "delete") { for (const x of rows) T.splice(T.indexOf(x), 1); if (st.table === "jobs") for (const x of rows) { db.job_prices = db.job_prices.filter(p => p.job_id !== x.id); db.job_files = db.job_files.filter(f => f.job_id !== x.id); } changed = true; }
   if (changed && st.table !== "profiles") setTimeout(() => pages.forEach(p => p.evaluate(() => window.__rt && window.__rt()).catch(() => { })), 50);
   const data = JSON.parse(JSON.stringify(out));
   return { data: st.single ? (data[0] || null) : data, error: null };
@@ -37,6 +49,7 @@ async function open(name) {
   await ctx.route('**/index.html', async r => { const res = await r.fetch(); const body = (await res.text()).replace(/ integrity="[^"]+"/, ''); r.fulfill({ response: res, body }); });
   await ctx.route('**/vendor/supabase-2.117.2.js', r => r.fulfill({ status: 200, contentType: 'application/javascript', body: fake }));
   await ctx.route('https://api.open-meteo.com/**', r => r.fulfill({ status: 503, body: '' }));
+  await ctx.route('https://files.test/**', r => r.fulfill({ status: 200, contentType: 'text/plain', headers: r.request().url().includes('download=') ? { 'content-disposition': 'attachment; filename="file.txt"' } : {}, body: 'file body' }));
   const p = await ctx.newPage(); pages.push(p); p._errs = [];
   p.on('pageerror', e => p._errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|Forecast/.test(m.text())) p._errs.push(m.text()); });
   p.on('dialog', d => { p._lastDialog = d.message(); d.accept(p._promptAnswer || undefined); });
@@ -63,6 +76,30 @@ await G.click('#btnSave'); await G.waitForTimeout(500);
 log('db jobs:', db.jobs.length, 'prices:', db.job_prices.map(p => p.price));
 await M.waitForTimeout(800);
 log('maria sees live:', await M.locator('#sideList .card').count(), (await M.textContent('#sideList')).includes('CSQU3054383'));
+// attachments: George adds two files in the editor, one bad file is refused
+await G.locator('#sideList .card').first().click();
+await G.setInputFiles('#filePick', [{ name: 'Τιμολόγιο 1.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test') }, { name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('png') }, { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('x') }]);
+await G.waitForTimeout(900);
+log('files in db:', db.job_files.map(f => f.name).join(' | '), '| objects:', Object.keys(objects).length, '| ascii keys:', Object.keys(objects).every(k => /^[A-Za-z0-9_./-]+$/.test(k)));
+log('editor lists:', await G.locator('#fileList .fi').count());
+await G.locator('#drop').scrollIntoViewIfNeeded(); await G.screenshot({ path: new URL('./g-editor.png', import.meta.url).pathname });
+const [pop] = await Promise.all([G.waitForEvent('popup'), G.locator('#fileList [data-open="0"]').click()]); await pop.waitForLoadState(); log('open in new tab:', pop.url().startsWith('https://files.test/sign/'), 'opener cut:', await pop.evaluate(() => window.opener === null)); await pop.close();
+const [fdl] = await Promise.all([G.waitForEvent('download'), G.locator('#fileList [data-dl="1"]').click()]); log('download:', fdl.url().includes('download=photo.png'));
+await G.click('#jobForm [data-close]'); await M.waitForTimeout(700);
+log('maria card shows clip:', (await M.textContent('#sideList')).includes('📎 2'));
+// drop a file straight onto a card on Maria's screen
+await M.evaluate(() => { const c = document.querySelector('#sideList .card'); const dt = new DataTransfer(); dt.items.add(new File(['hello'], 'delivery note.txt', { type: 'text/plain' })); for (const t of ['dragover', 'drop']) c.dispatchEvent(new DragEvent(t, { bubbles: true, cancelable: true, dataTransfer: dt })); });
+await M.waitForTimeout(800); log('dropped on card:', db.job_files.length, db.job_files.at(-1).name, 'by', db.job_files.at(-1).uploaded_by);
+// remove one
+await M.locator('#sideList .card').first().click(); await M.locator('#fileList [data-fdel="2"]').click(); await M.waitForTimeout(600);
+log('after remove:', db.job_files.length, Object.keys(objects).length); await M.click('#jobForm [data-close]');
+// new job with a queued file
+await G.click('#btnNew'); await G.fill('#f_client', 'Queued Co'); await G.setInputFiles('#filePick', [{ name: 'quote.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') }]);
+log('queued before save:', await G.locator('#fileList .fi.pending').count(), db.job_files.length);
+await G.click('#btnSave'); await G.waitForTimeout(900);
+const qj = db.jobs.find(j => j.client === 'Queued Co'); log('queued uploaded:', db.job_files.filter(f => f.job_id === qj.id).length);
+await G.locator('#sideList .card', { hasText: 'Queued Co' }).click(); await G.click('#btnDelete'); await G.waitForTimeout(600);
+log('job deleted, its files gone:', db.job_files.filter(f => f.job_id === qj.id).length, Object.keys(objects).filter(k => k.startsWith(qj.id)).length);
 // conflict: both open, Maria saves first
 await G.locator('#sideList .card').first().click(); await M.locator('#sideList .card').first().click();
 await M.fill('#f_client', 'Client One (Maria)'); await M.click('#btnSave'); await M.waitForTimeout(400);
@@ -86,6 +123,7 @@ log('maria has Users tab:', await M.isVisible('#navUsers'));
 // make Maria depot -> no price
 db.profiles.find(p => p.id === 'u-maria').role = 'depot';
 await M.reload(); await M.fill('#lg_email', 'maria@test'); await M.fill('#lg_pw', 'pw-maria-123'); await M.click('#lg_btn'); await M.waitForSelector('#gate', { state: 'hidden' }); await M.locator('#sideList .card').first().click();
+log('depot sees attachments:', await M.isVisible('#drop'), '| clip on card:', (await M.textContent('#sideList')).includes('📎'));
 const txt = await M.evaluate(() => document.body.innerText); log('depot price field hidden:', await M.isHidden('#f_price'), '| price value:', JSON.stringify(await M.inputValue('#f_price')), '| price on screen:', txt.includes('350'));
 await M.click('#jobForm [data-close]');
 // export as admin
@@ -93,7 +131,7 @@ await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.wai
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });
 // delete
 await G.locator('#sideList .card').first().click(); await G.click('#btnDelete'); await G.waitForTimeout(500);
-log('deleted, jobs:', db.jobs.length, 'prices:', db.job_prices.length);
+log('deleted, jobs:', db.jobs.length, 'prices:', db.job_prices.length, 'files:', db.job_files.length, 'objects:', Object.keys(objects).length);
 // sign out
 await G.click('#btnMenu'); await G.click('[data-act=signout]'); await G.waitForTimeout(300); log('after sign out gate visible:', await G.isVisible('#gate'));
 for (const [n, p] of [['G', G], ['M', M], ['N', N]]) log(n, 'errors:', p._errs);
