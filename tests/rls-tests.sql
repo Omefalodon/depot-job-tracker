@@ -1,0 +1,92 @@
+-- Database rule tests (Row Level Security). Run in the Supabase SQL editor, or through Claude.
+-- Everything inside the test block is rolled back: no jobs, prices or notes are left behind.
+-- Expected: every row ok = true.
+--
+-- One-time setup (already done on 2026-10-20): four test logins that cannot sign in
+-- (no password, .invalid emails). The app's Users screen hides them.
+--   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data) values
+--    ('00000000-0000-4000-8000-0000000000a1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','test-admin@example.invalid','', now(), now(), now(), '{}','{}'),
+--    ('00000000-0000-4000-8000-0000000000b2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','test-office@example.invalid','', now(), now(), now(), '{}','{}'),
+--    ('00000000-0000-4000-8000-0000000000c3','00000000-0000-0000-0000-000000000000','authenticated','authenticated','test-depot@example.invalid','', now(), now(), now(), '{}','{}'),
+--    ('00000000-0000-4000-8000-0000000000d4','00000000-0000-0000-0000-000000000000','authenticated','authenticated','test-pending@example.invalid','', now(), now(), now(), '{}','{}');
+update public.profiles set active = true, role = 'admin' where id = '00000000-0000-4000-8000-0000000000a1';
+update public.profiles set active = true, role = 'office' where id = '00000000-0000-4000-8000-0000000000b2';
+update public.profiles set active = true, role = 'depot' where id = '00000000-0000-4000-8000-0000000000c3';
+update public.profiles set active = false, role = 'office' where id = '00000000-0000-4000-8000-0000000000d4';
+
+create temp table t_results (n serial, test text, ok boolean);
+do $$
+declare c int; jid uuid; err text; r text[] := array[]::text[]; b boolean[] := array[]::boolean[];
+begin
+  begin
+  -- OFFICE
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000b2","role":"authenticated"}', true);
+  insert into public.jobs (client, status, created_by) values ('RLS test', 'open', '00000000-0000-4000-8000-0000000000a1') returning id into jid;
+  select count(*) into c from public.jobs where id = jid and created_by = '00000000-0000-4000-8000-0000000000b2';
+  r := array_append(r, 'office: add job, created_by forced to self'); b := array_append(b, c = 1);
+  insert into public.job_prices (job_id, price) values (jid, 123.45);
+  select count(*) into c from public.job_prices where job_id = jid;
+  r := array_append(r, 'office: add + read price'); b := array_append(b, c = 1);
+  insert into public.day_notes (day, note) values ('2026-10-20', 'test note');
+  r := array_append(r, 'office: add day note'); b := array_append(b, true);
+  update public.profiles set role = 'admin', active = true where id = '00000000-0000-4000-8000-0000000000b2';
+  select count(*) into c from public.profiles where id = '00000000-0000-4000-8000-0000000000b2' and role = 'office';
+  r := array_append(r, 'office: cannot make self admin'); b := array_append(b, c = 1);
+  update public.profiles set full_name = 'Office Tester' where id = '00000000-0000-4000-8000-0000000000b2';
+  select count(*) into c from public.profiles where full_name = 'Office Tester';
+  r := array_append(r, 'office: can set own name'); b := array_append(b, c = 1);
+  update public.profiles set full_name = 'hacked' where id = '00000000-0000-4000-8000-0000000000a1';
+  select count(*) into c from public.profiles where full_name = 'hacked';
+  r := array_append(r, 'office: cannot rename others'); b := array_append(b, c = 0);
+  begin insert into public.job_history (job_id, action) values (jid, 'fake'); err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'office: cannot write history'); b := array_append(b, err = 'blocked');
+  select count(*) into c from public.job_history where job_id = jid;
+  r := array_append(r, 'office: sees job + price history (' || c || ')'); b := array_append(b, c = 2);
+  -- DEPOT
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c3","role":"authenticated"}', true);
+  select count(*) into c from public.jobs where id = jid;
+  r := array_append(r, 'depot: sees job'); b := array_append(b, c = 1);
+  select count(*) into c from public.job_prices;
+  r := array_append(r, 'depot: sees no prices'); b := array_append(b, c = 0);
+  select count(*) into c from public.job_history where job_id = jid;
+  r := array_append(r, 'depot: no price history (' || c || ')'); b := array_append(b, c = 1);
+  begin insert into public.job_prices (job_id, price) values (jid, 1); err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'depot: cannot write price'); b := array_append(b, err = 'blocked');
+  -- PENDING (not yet approved)
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000d4","role":"authenticated"}', true);
+  select count(*) into c from public.jobs;
+  r := array_append(r, 'pending: sees no jobs'); b := array_append(b, c = 0);
+  select count(*) into c from public.day_notes;
+  r := array_append(r, 'pending: sees no notes'); b := array_append(b, c = 0);
+  begin insert into public.jobs (client) values ('x'); err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'pending: cannot add job'); b := array_append(b, err = 'blocked');
+  select count(*) into c from public.profiles;
+  r := array_append(r, 'pending: sees only own profile (' || c || ')'); b := array_append(b, c = 1);
+  update public.profiles set active = true where id = '00000000-0000-4000-8000-0000000000d4';
+  perform set_config('role', 'postgres', true);
+  select count(*) into c from public.profiles where id = '00000000-0000-4000-8000-0000000000d4' and active;
+  r := array_append(r, 'pending: cannot approve self'); b := array_append(b, c = 0);
+  -- NOT SIGNED IN
+  perform set_config('role', 'anon', true);
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  begin select count(*) into c from public.jobs; err := 'allowed ' || c; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'anon: cannot read jobs (' || err || ')'); b := array_append(b, err = 'blocked' or err = 'allowed 0');
+  begin select count(*) into c from public.profiles; err := 'allowed ' || c; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'anon: cannot read profiles (' || err || ')'); b := array_append(b, err = 'blocked' or err = 'allowed 0');
+  -- ADMIN
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+  update public.profiles set active = true where id = '00000000-0000-4000-8000-0000000000d4';
+  select count(*) into c from public.profiles where id = '00000000-0000-4000-8000-0000000000d4' and active;
+  r := array_append(r, 'admin: can approve a user'); b := array_append(b, c = 1);
+  begin update public.profiles set role = 'office' where id = '00000000-0000-4000-8000-0000000000a1'; err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'admin: cannot demote self'); b := array_append(b, err = 'blocked');
+  raise exception 'rollback';
+  exception when others then
+    perform set_config('role', 'postgres', true);
+    if sqlerrm <> 'rollback' then r := array_append(r, 'SUITE CRASHED: ' || sqlerrm); b := array_append(b, false); end if;
+  end;
+  for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_results(test, ok) values (r[i], b[i]); end loop;
+end $$;
+select test, ok from t_results order by n;

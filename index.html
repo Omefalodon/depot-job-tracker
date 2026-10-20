@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src https://ckoektkvzdlzniuietpb.supabase.co wss://ckoektkvzdlzniuietpb.supabase.co https://api.open-meteo.com; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Depot Job Tracker</title>
+<style>
+:root{
+  --bg:#f4f5f7; --surface:#ffffff; --surface2:#eef0f3; --border:#d9dde3; --text:#1d2330; --muted:#5f6b7a;
+  --accent:#1f6feb; --accent-weak:#e3edfd; --danger:#c62828; --warn:#a15c00; --warn-bg:#fff4e0;
+  --s-open:#6b7280; --s-scheduled:#1f6feb; --s-progress:#b26a00; --s-done:#2e7d32;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#14171c; --surface:#1d2128; --surface2:#262b33; --border:#343a44; --text:#e6e9ee; --muted:#9aa4b2;
+  --accent:#5b9bff; --accent-weak:#1e2d47; --danger:#ff6b6b; --warn:#f0b35a; --warn-bg:#3a2c12;
+  --s-open:#9aa4b2; --s-scheduled:#5b9bff; --s-progress:#f0b35a; --s-done:#66bb6a;
+}}
+:root[data-theme="dark"]{
+  --bg:#14171c; --surface:#1d2128; --surface2:#262b33; --border:#343a44; --text:#e6e9ee; --muted:#9aa4b2;
+  --accent:#5b9bff; --accent-weak:#1e2d47; --danger:#ff6b6b; --warn:#f0b35a; --warn-bg:#3a2c12;
+  --s-open:#9aa4b2; --s-scheduled:#5b9bff; --s-progress:#f0b35a; --s-done:#66bb6a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,-apple-system,sans-serif;display:flex;flex-direction:column}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:6px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--danger)}
+button.ghost{border-color:transparent;background:transparent}
+input,select,textarea{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 8px;width:100%}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap}
+header h1{font-size:16px;margin:0 12px 0 4px;white-space:nowrap}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{border-color:transparent;background:transparent}
+nav button.active{background:var(--accent-weak);color:var(--accent);border-color:var(--accent-weak);font-weight:600}
+.spacer{flex:1}
+.menu{position:relative}
+.menu-list{position:absolute;right:0;top:110%;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);min-width:220px;z-index:20;display:none;padding:4px}
+.menu-list.open{display:block}
+.menu-list button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 10px}
+.menu-list button:hover{background:var(--surface2)}
+.menu-list hr{border:0;border-top:1px solid var(--border);margin:4px 0}
+.banner{background:var(--warn-bg);color:var(--warn);padding:6px 12px;font-size:13px;border-bottom:1px solid var(--border)}
+.layout{flex:1;display:flex;min-height:0}
+aside{width:300px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+aside.hidden{display:none}
+.side-head{padding:10px;border-bottom:1px solid var(--border)}
+.side-head .count{color:var(--muted);font-size:12px;margin-top:6px}
+.side-list{overflow:auto;flex:1;padding:6px}
+main{flex:1;overflow:auto;padding:14px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--s-open);border-radius:8px;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+.card:hover{border-color:var(--accent);border-left-color:inherit}
+.card .t{font-weight:600;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;justify-content:space-between}
+.card .m{color:var(--muted);font-size:12px}
+.card .prog{font-size:11px;color:var(--muted)}
+.st-open{border-left-color:var(--s-open)} .st-scheduled{border-left-color:var(--s-scheduled)}
+.st-in-progress{border-left-color:var(--s-progress)} .st-done{border-left-color:var(--s-done)}
+.pill{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor;white-space:nowrap;font-weight:600}
+.p-open{color:var(--s-open)} .p-scheduled{color:var(--s-scheduled)} .p-in-progress{color:var(--s-progress)} .p-done{color:var(--s-done)}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.toolbar h2{font-size:18px;margin:0 8px 0 0}
+.toolbar select,.toolbar input{width:auto}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+th,td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;font-size:13px}
+th{background:var(--surface2);font-weight:600;white-space:nowrap;cursor:pointer;user-select:none}
+tr.row{cursor:pointer} tr.row:hover td{background:var(--accent-weak)}
+.tablewrap{overflow-x:auto}
+.week{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:8px;overflow-x:auto}
+.col{background:var(--surface2);border-radius:8px;padding:8px;min-height:200px}
+.col h3{font-size:13px;margin:0 0 8px;display:flex;justify-content:space-between}
+.col.today{outline:2px solid var(--accent)}
+.col.dragover{outline:2px dashed var(--accent)}
+.wgrid{display:grid;grid-template-columns:58px repeat(7,minmax(140px,1fr));background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:auto}
+.wgrid>div{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:4px;min-width:0}
+.wgrid .wh{background:var(--surface2)}
+.wgrid .wh h3{font-size:13px;margin:0 0 4px;display:flex;justify-content:space-between}
+.wgrid .wh.today{box-shadow:inset 0 -3px 0 var(--accent)}
+.wgrid .hr{font-size:11px;color:var(--muted);text-align:right;padding-right:6px;background:var(--surface2)}
+.wgrid .slot{min-height:42px;cursor:copy}
+.wgrid .slot.today{background:var(--accent-weak)}
+.wgrid .slot.notime{min-height:50px;background:var(--surface2)}
+.wgrid .slot.dragover{outline:2px dashed var(--accent);outline-offset:-2px}
+.wgrid .notes{padding:4px}
+.card.compact{padding:4px 7px;margin-bottom:3px}
+.card.compact .t{font-size:12px}
+.card.compact .pill{font-size:10px;padding:0 5px}
+.wx{font-size:12px;color:var(--muted);margin:-4px 0 8px;line-height:1.35}
+.wx .ic{font-size:16px;vertical-align:-2px}
+.wx.alert{color:var(--warn);font-weight:600}
+.daynote{margin:0;min-height:70px;font-size:12px;resize:vertical;background:var(--surface)}
+.board{display:grid;grid-template-columns:repeat(4,minmax(200px,1fr));gap:10px;overflow-x:auto}
+.projects{display:grid;grid-template-columns:240px 1fr;gap:14px}
+.plist button{display:flex;justify-content:space-between;width:100%;margin-bottom:4px;text-align:left}
+.plist button.active{border-color:var(--accent);background:var(--accent-weak)}
+.empty{color:var(--muted);padding:20px;text-align:center}
+dialog{border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);padding:0;width:min(760px,96vw);max-height:92vh}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.dlg-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.dlg-head h2{margin:0;font-size:16px}
+.dlg-body{padding:14px 16px;overflow:auto;max-height:calc(92vh - 120px)}
+.dlg-foot{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border)}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.grid .wide{grid-column:1/-1}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+.hint{font-size:11px;color:var(--warn);min-height:14px;margin-top:2px}
+.checks .ci{display:flex;gap:8px;align-items:center;margin-bottom:4px}
+.checks .ci input[type=checkbox]{width:auto}
+.checks .ci input[type=text]{flex:1}
+.checks .ci.done input[type=text]{text-decoration:line-through;color:var(--muted)}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+.toast.show{opacity:1}
+mark{background:#ffe58f;color:#000;border-radius:2px}
+#gate{position:fixed;inset:0;background:var(--bg);z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}
+#gate[hidden]{display:none}
+.gatebox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:min(380px,100%)}
+.gatebox h2{margin:0 0 4px;font-size:20px}
+.gatebox p{color:var(--muted);margin:0 0 16px}
+.gatebox label{margin-top:10px}
+.gatebox button{width:100%;margin-top:16px}
+.gatebox .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:8px}
+.who{font-size:12px;color:var(--muted);white-space:nowrap}
+.meta{font-size:12px;color:var(--muted);margin-top:8px}
+.hist{font-size:12px;margin-top:6px;max-height:180px;overflow:auto;border-top:1px solid var(--border);padding-top:6px}
+.hist div{padding:2px 0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--s-done);margin-right:4px}
+.dot.off{background:var(--danger)}
+@media (max-width:760px){
+  aside{position:fixed;z-index:15;top:52px;bottom:0;left:0;width:88vw;box-shadow:4px 0 20px rgba(0,0,0,.2)}
+  .grid{grid-template-columns:1fr}
+  .projects{grid-template-columns:1fr}
+  main{padding:10px 16px}
+}
+</style>
+</head>
+<body>
+<header>
+  <button id="btnPanel" class="ghost" title="Show / hide the open jobs panel" aria-label="Toggle panel">☰</button>
+  <h1>Depot Job Tracker</h1>
+  <nav id="nav">
+    <button data-view="all">All jobs</button>
+    <button data-view="week">Week</button>
+    <button data-view="board">Today</button>
+    <button data-view="projects">Projects</button>
+    <button data-view="users" id="navUsers" hidden>Users</button>
+  </nav>
+  <div class="spacer"></div>
+  <span class="who" id="who"></span>
+  <button id="btnNew" class="primary">+ New job</button>
+  <div class="menu">
+    <button id="btnMenu" aria-label="More">⋯</button>
+    <div class="menu-list" id="menuList">
+      <button data-act="backup">Save a copy of all jobs (.json)</button>
+      <button data-act="restore" class="admin-only" hidden>Import jobs from a demo backup…</button>
+      <hr>
+      <button data-act="name">Set my name…</button>
+      <button data-act="password">Change my password…</button>
+      <button data-act="signout">Sign out</button>
+      <hr>
+      <button data-act="theme">Switch light / dark</button>
+      <button data-act="selftest">Run self-test</button>
+    </div>
+  </div>
+  <input type="file" id="fileRestore" accept=".json,application/json" hidden>
+</header>
+<div id="banner" class="banner" hidden></div>
+<div id="gate">
+  <form class="gatebox" id="loginForm" autocomplete="on">
+    <h2>Depot Job Tracker</h2>
+    <p id="gateMsg">Sign in with the login George gave you.</p>
+    <div id="loginFields">
+      <label for="lg_email">Email</label><input id="lg_email" type="email" autocomplete="username" required>
+      <label for="lg_pw">Password</label><input id="lg_pw" type="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="primary" id="lg_btn">Sign in</button>
+    <button type="button" id="lg_out" hidden>Sign out</button>
+    <div class="err" id="lg_err"></div>
+    <p style="font-size:12px;margin:8px 0 0">Forgot your password? Ask George to reset it.</p>
+  </form>
+</div>
+<div class="layout">
+  <aside id="panel">
+    <div class="side-head">
+      <input id="search" type="search" placeholder="Search jobs (container, plate, client…)" autocomplete="off">
+      <div class="count" id="sideCount"></div>
+    </div>
+    <div class="side-list" id="sideList"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<dialog id="dlg">
+  <form id="jobForm" method="dialog" autocomplete="off">
+    <div class="dlg-head"><h2 id="dlgTitle">New job</h2><button type="button" class="ghost" data-close aria-label="Close">✕</button></div>
+    <div class="dlg-body">
+      <div class="grid">
+        <div><label for="f_client">Client</label><input id="f_client" name="client" list="dl_client" maxlength="120"></div>
+        <div><label for="f_project">Project</label><input id="f_project" name="project" list="dl_project" maxlength="120"></div>
+        <div><label for="f_ref">Ref</label><input id="f_ref" name="ref" maxlength="80"></div>
+        <div><label for="f_shippingContainer">Shipping container</label><input id="f_shippingContainer" name="shippingContainer" maxlength="20" placeholder="e.g. MSCU1234566"><div class="hint" id="h_shippingContainer"></div></div>
+        <div><label for="f_hctContainer">HCT container</label><input id="f_hctContainer" name="hctContainer" maxlength="20"><div class="hint" id="h_hctContainer"></div></div>
+        <div><label for="f_truckPlate">Truck plate</label><input id="f_truckPlate" name="truckPlate" maxlength="20" list="dl_truckPlate"></div>
+        <div><label for="f_transporter">Transporter</label><input id="f_transporter" name="transporter" list="dl_transporter" maxlength="120"></div>
+        <div><label for="f_cargoType">Cargo type</label><input id="f_cargoType" name="cargoType" list="dl_cargoType" maxlength="120"></div>
+        <div><label for="f_weight">Weight (kg)</label><input id="f_weight" name="weight" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div><label for="f_pieces">Pieces</label><input id="f_pieces" name="pieces" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div class="price-only"><label for="f_price">Price (€)</label><input id="f_price" name="price" type="number" min="0" step="0.01" inputmode="decimal"></div>
+        <div><label for="f_date">Date</label><input id="f_date" name="date" type="date"></div>
+        <div><label for="f_time">Time</label><input id="f_time" name="time" type="time" step="900"></div>
+        <div><label for="f_status">Status</label>
+          <select id="f_status" name="status">
+            <option value="open">Open</option><option value="scheduled">Scheduled</option>
+            <option value="in-progress">In progress</option><option value="done">Done</option>
+          </select></div>
+        <div class="wide"><label for="f_notes">Free text</label><textarea id="f_notes" name="notes" rows="3" maxlength="4000"></textarea></div>
+        <div class="wide checks">
+          <label>Checklist</label>
+          <div id="checkList"></div>
+          <button type="button" id="btnAddCheck">+ Add step</button>
+        </div>
+        <div class="wide" id="jobMeta"></div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <button type="submit" class="primary" id="btnSave">Save</button>
+      <button type="button" data-close>Cancel</button>
+      <div class="spacer"></div>
+      <button type="button" class="danger" id="btnDelete">Delete</button>
+    </div>
+  </form>
+</dialog>
+<datalist id="dl_client"></datalist><datalist id="dl_project"></datalist><datalist id="dl_transporter"></datalist>
+<datalist id="dl_cargoType"></datalist><datalist id="dl_truckPlate"></datalist>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="vendor/supabase-2.117.2.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script>
+"use strict";
+/* ================= Pure logic (no DOM) — covered by the self-test ================= */
+const DJ = (() => {
+  const STATUSES = ["open", "scheduled", "in-progress", "done"];
+  const STATUS_LABEL = { "open": "Open", "scheduled": "Scheduled", "in-progress": "In progress", "done": "Done" };
+  const FIELDS = [
+    ["client", "Client"], ["shippingContainer", "Shipping container"], ["hctContainer", "HCT container"],
+    ["truckPlate", "Truck plate"], ["transporter", "Transporter"], ["cargoType", "Cargo type"],
+    ["weight", "Weight (kg)"], ["pieces", "Pieces"], ["price", "Price (€)"], ["date", "Date"], ["time", "Time"], ["project", "Project"], ["ref", "Ref"], ["notes", "Free text"]
+  ];
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // ISO 6346 container check digit. Returns "" if fine/empty, otherwise a warning text.
+  function containerWarning(raw) {
+    const s = String(raw || "").toUpperCase().replace(/[\s-]/g, "");
+    if (!s) return "";
+    if (!/^[A-Z]{4}\d{7}$/.test(s)) return "Not the usual format (4 letters + 7 digits)";
+    const map = {}; let v = 10;
+    for (let i = 0; i < 26; i++) { if (v % 11 === 0) v++; map[String.fromCharCode(65 + i)] = v++; }
+    let sum = 0;
+    for (let i = 0; i < 10; i++) { const c = s[i]; sum += (/\d/.test(c) ? +c : map[c]) * Math.pow(2, i); }
+    const check = (sum % 11) % 10;
+    return check === +s[10] ? "" : "Check digit doesn't match (should end in " + check + ") — typo?";
+  }
+  function normContainer(raw) { return String(raw || "").toUpperCase().replace(/[\s-]/g, ""); }
+
+  // Dates are kept as local "YYYY-MM-DD" strings.
+  function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function parseYmd(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+  function mondayOf(s) { const d = parseYmd(s); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return ymd(d); }
+  function addDays(s, n) { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); }
+
+  function matches(job, q) {
+    q = String(q || "").trim().toLowerCase();
+    if (!q) return true;
+    const hay = FIELDS.map(([k]) => job[k] == null ? "" : String(job[k])).join(" ").toLowerCase() + " " +
+      (job.checklist || []).map(c => c.text).join(" ").toLowerCase();
+    return q.split(/\s+/).every(w => hay.includes(w));
+  }
+
+  function newId() {
+    try { return crypto.randomUUID(); } catch (e) { return "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  }
+
+  function cleanJob(j) {
+    const out = { id: String(j.id || newId()) };
+    for (const [k] of FIELDS) out[k] = j[k] == null ? "" : String(j[k]).slice(0, 4000);
+    out.shippingContainer = normContainer(out.shippingContainer);
+    out.hctContainer = normContainer(out.hctContainer);
+    out.truckPlate = out.truckPlate.toUpperCase().trim();
+    out.price = out.price === "" || isNaN(+out.price) ? "" : String(Math.round(Math.max(0, +out.price) * 100) / 100);
+    for (const k of ["weight", "pieces"]) out[k] = out[k] === "" || isNaN(+out[k]) ? "" : String(Math.max(0, Math.round(+out[k])));
+    if (out.date && !/^\d{4}-\d{2}-\d{2}$/.test(out.date)) out.date = "";
+    out.time = /^([01]\d|2[0-3]):[0-5]\d/.test(out.time) ? out.time.slice(0, 5) : "";
+    out.status = STATUSES.includes(j.status) ? j.status : "open";
+    out.checklist = Array.isArray(j.checklist) ? j.checklist.filter(c => c && String(c.text || "").trim())
+      .map(c => ({ text: String(c.text).slice(0, 300), done: !!c.done })) : [];
+    out.created = j.created || "";
+    out.updated = j.updated || "";
+    out.createdBy = j.createdBy || "";
+    out.updatedBy = j.updatedBy || "";
+    return out;
+  }
+
+  function title(j) { return j.shippingContainer || j.hctContainer || j.ref || j.client || "(untitled job)"; }
+
+  /* ---- Minimal .xlsx writer: stored (uncompressed) ZIP, inline strings. No libraries, no network. ---- */
+  const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function zip(files) { // files: [{name, data:Uint8Array}]
+    const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, 0, true); h.setUint16(12, 0x21, true); h.setUint32(14, crc, true); h.setUint32(18, size, true);
+      h.setUint32(22, size, true); h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+      parts.push(new Uint8Array(h.buffer), name, f.data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+      c.setUint16(10, 0, true); c.setUint16(12, 0, true); c.setUint16(14, 0x21, true); c.setUint32(16, crc, true);
+      c.setUint32(20, size, true); c.setUint32(24, size, true); c.setUint16(28, name.length, true);
+      c.setUint32(42, offset, true);
+      central.push(new Uint8Array(c.buffer), name);
+      offset += 30 + name.length + size;
+    }
+    const cdSize = central.reduce((a, b) => a + b.length, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+    e.setUint32(12, cdSize, true); e.setUint32(16, offset, true);
+    const all = parts.concat(central, [new Uint8Array(e.buffer)]);
+    const out = new Uint8Array(all.reduce((a, b) => a + b.length, 0)); let p = 0;
+    for (const a of all) { out.set(a, p); p += a.length; }
+    return out;
+  }
+  function xmlEsc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ""); }
+  function colName(i) { let s = ""; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  // rows: array of arrays; numbers become numeric cells, everything else text. Row 0 = header (bold).
+  function xlsx(rows, sheetName) {
+    const enc = new TextEncoder();
+    const sd = rows.map((r, ri) => '<row r="' + (ri + 1) + '">' + r.map((v, ci) => {
+      const ref = colName(ci) + (ri + 1), st = ri === 0 ? ' s="1"' : "";
+      if (typeof v === "number" && isFinite(v)) return '<c r="' + ref + '"' + st + '><v>' + v + '</v></c>';
+      return '<c r="' + ref + '"' + st + ' t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(v == null ? "" : v) + '</t></is></c>';
+    }).join("") + '</row>').join("");
+    const widths = rows[0] ? rows[0].map((_, ci) => Math.min(60, Math.max(10, ...rows.map(r => String(r[ci] == null ? "" : r[ci]).length + 2)))) : [];
+    const cols = widths.length ? "<cols>" + widths.map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join("") + "</cols>" : "";
+    const name = xmlEsc(String(sheetName || "Jobs").replace(/[\\\/\?\*\[\]:]/g, " ").slice(0, 31) || "Jobs");
+    const files = {
+      "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+      "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+      "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' + name + '" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+      "xl/worksheets/sheet1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' + cols + '<sheetData>' + sd + '</sheetData>' + (rows.length > 1 ? '<autoFilter ref="A1:' + colName(rows[0].length - 1) + rows.length + '"/>' : '') + '</worksheet>'
+    };
+    return zip(Object.keys(files).map(n => ({ name: n, data: enc.encode(files[n]) })));
+  }
+  function jobsToRows(jobs) {
+    const head = FIELDS.map(f => f[1]).concat(["Status", "Checklist"]);
+    const rows = jobs.map(j => FIELDS.map(([k]) => (k === "weight" || k === "pieces" || k === "price") && j[k] !== "" ? +j[k] : j[k])
+      .concat([STATUS_LABEL[j.status], (j.checklist || []).map(c => (c.done ? "[x] " : "[ ] ") + c.text).join("; ")]));
+    return [head].concat(rows);
+  }
+
+  /* ---- Weather (Open-Meteo, free, no key; only the location is sent) ---- */
+  const WX_PLACES = {
+    aspropyrgos: { name: "Aspropyrgos (HQ)", lat: 38.0617, lon: 23.5877 },
+    perama: { name: "Perama (branch)", lat: 37.9640, lon: 23.5680 }
+  };
+  function wxUrl(lat, lon) {
+    return "https://api.open-meteo.com/v1/forecast?latitude=" + (+lat).toFixed(4) + "&longitude=" + (+lon).toFixed(4) +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max" +
+      "&timezone=Europe%2FAthens&forecast_days=16";
+  }
+  // Open-Meteo daily arrays -> { "YYYY-MM-DD": {...} }
+  function wxParse(d) {
+    const out = {}; if (!d || !d.daily || !Array.isArray(d.daily.time)) return out;
+    const D = d.daily;
+    D.time.forEach((t, i) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return;
+      const num = a => (Array.isArray(a) && typeof a[i] === "number" && isFinite(a[i])) ? a[i] : null;
+      out[t] = { code: num(D.weather_code), tmax: num(D.temperature_2m_max), tmin: num(D.temperature_2m_min), rainPct: num(D.precipitation_probability_max), rainMm: num(D.precipitation_sum), wind: num(D.wind_speed_10m_max), gust: num(D.wind_gusts_10m_max) };
+    });
+    return out;
+  }
+  // WMO weather code -> [icon, text]
+  function wxIcon(code) {
+    if (code == null) return ["", ""];
+    if (code === 0) return ["☀️", "Clear"];
+    if (code <= 2) return ["🌤️", "Partly cloudy"];
+    if (code === 3) return ["☁️", "Cloudy"];
+    if (code === 45 || code === 48) return ["🌫️", "Fog"];
+    if (code >= 51 && code <= 57) return ["🌦️", "Drizzle"];
+    if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return ["🌧️", "Rain"];
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86) return ["🌨️", "Snow"];
+    if (code >= 95) return ["⛈️", "Thunderstorm"];
+    return ["🌡️", "Code " + code];
+  }
+  // Conditions that matter for loading in the yard
+  function wxAlert(w) {
+    if (!w) return "";
+    const r = [];
+    if (w.gust != null && w.gust >= 50) r.push("strong gusts");
+    if (w.rainPct != null && w.rainPct >= 60) r.push("rain likely");
+    if (w.code != null && w.code >= 95) r.push("thunderstorm");
+    return r.join(", ");
+  }
+
+  /* ---- Database rows <-> app jobs ---- */
+  const COLS = { client: "client", shippingContainer: "shipping_container", hctContainer: "hct_container", truckPlate: "truck_plate", transporter: "transporter", cargoType: "cargo_type", weight: "weight", pieces: "pieces", date: "job_date", time: "job_time", project: "project", ref: "ref", notes: "notes" };
+  function toRow(j) {
+    const c = cleanJob(j), r = {};
+    for (const k in COLS) r[COLS[k]] = c[k];
+    for (const k of ["weight", "pieces"]) r[COLS[k]] = c[k] === "" ? null : +c[k];
+    r.job_date = c.date || null; r.job_time = c.time || null;
+    r.status = c.status; r.checklist = c.checklist;
+    return r;
+  }
+  function fromRow(r, priceRow) {
+    const j = { id: r.id };
+    for (const k in COLS) j[k] = r[COLS[k]] == null ? "" : r[COLS[k]];
+    j.time = j.time ? String(j.time).slice(0, 5) : "";
+    j.status = r.status; j.checklist = r.checklist;
+    j.price = priceRow && priceRow.price != null ? priceRow.price : "";
+    j.created = r.created_at; j.updated = r.updated_at; j.createdBy = r.created_by; j.updatedBy = r.updated_by;
+    return cleanJob(j);
+  }
+  // Which fields differ between two history rows (for the "Changes" list)
+  function changedFields(oldRow, newRow) {
+    if (!oldRow || !newRow) return [];
+    const names = { status: "Status", checklist: "Checklist", price: "Price" }; for (const [k, l] of FIELDS) if (COLS[k]) names[COLS[k]] = l;
+    return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
+  }
+
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName };
+})();
+
+/* ================= Supabase ================= */
+const SUPABASE_URL = "https://ckoektkvzdlzniuietpb.supabase.co";
+const SUPABASE_KEY = "sb_publishable_iJWM1zoNnm_gyP8bEx-74g_aGlMHRMH"; // publishable key: safe in the page, the database rules do the protecting
+const UI_KEY = "depotJobTracker.ui", WX_KEY = "depotJobTracker.weather";
+if (!window.supabase) { document.body.innerHTML = "<p style=\"padding:20px\">The app couldn't load one of its files (vendor/supabase). Reload the page; if it keeps happening, tell George.</p>"; throw new Error("supabase library missing"); }
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+let me = null;            // my profile row
+let people = {};          // id -> profile
+let jobs = [], dayNotes = {}, online = true, loaded = false;
+const dirtyNotes = new Set();
+function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch (e) { return {}; } }
+function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) { } }
+function cleanDayNotes(d) { const o = {}; if (d && typeof d === "object") for (const k of Object.keys(d)) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && String(d[k]).trim()) o[k] = String(d[k]).slice(0, 4000); return o; }
+const seesPrices = () => me && (me.role === "admin" || me.role === "office");
+const isAdmin = () => me && me.role === "admin";
+function personName(id) { const p = people[id]; return p ? (p.full_name || p.email) : "someone"; }
+function fail(what, error) { console.error(what, error); toast(what + ": " + (error && error.message ? error.message : "no connection")); }
+
+const DB = {
+  async loadAll() {
+    const [j, pr, n, pp] = await Promise.all([
+      sb.from("jobs").select("*").order("job_date", { ascending: true, nullsFirst: false }).limit(5000),
+      seesPrices() ? sb.from("job_prices").select("job_id,price") : Promise.resolve({ data: [] }),
+      sb.from("day_notes").select("day,note"),
+      sb.from("profiles").select("id,email,full_name,role,active")
+    ]);
+    const err = j.error || pr.error || n.error || pp.error; if (err) throw err;
+    const prices = {}; for (const r of pr.data) prices[r.job_id] = r;
+    jobs = j.data.map(r => DJ.fromRow(r, prices[r.id]));
+    const keep = {}; for (const d of dirtyNotes) keep[d] = dayNotes[d];
+    dayNotes = {}; for (const r of n.data) dayNotes[r.day] = r.note;
+    Object.assign(dayNotes, keep);
+    people = {}; for (const p of pp.data) people[p.id] = p;
+    if (me && people[me.id]) me = people[me.id];
+    loaded = true;
+  },
+  // Saves a job. expectUpdated = the updated_at the editor started from (null for new jobs).
+  async saveJob(job, expectUpdated, force) {
+    const row = DJ.toRow(job);
+    let res;
+    if (job.id) {
+      let qb = sb.from("jobs").update(row).eq("id", job.id);
+      if (expectUpdated && !force) qb = qb.eq("updated_at", expectUpdated);
+      res = await qb.select();
+      if (res.error) throw res.error;
+      if (!res.data.length) return { conflict: true };
+    } else {
+      res = await sb.from("jobs").insert(row).select();
+      if (res.error) throw res.error;
+    }
+    const saved = res.data[0];
+    if (seesPrices()) {
+      const pr = job.price === "" ? await sb.from("job_prices").delete().eq("job_id", saved.id)
+        : await sb.from("job_prices").upsert({ job_id: saved.id, price: +job.price });
+      if (pr.error) throw pr.error;
+    }
+    return { row: saved };
+  },
+  async patchJob(job) { // drag & drop: date / time / status only
+    const r = await sb.from("jobs").update({ job_date: job.date || null, job_time: job.time || null, status: job.status }).eq("id", job.id).select();
+    if (r.error) throw r.error;
+  },
+  async deleteJob(id) { const r = await sb.from("jobs").delete().eq("id", id); if (r.error) throw r.error; },
+  async saveNote(day, text) {
+    const r = text.trim() ? await sb.from("day_notes").upsert({ day, note: text.slice(0, 4000) }) : await sb.from("day_notes").delete().eq("day", day);
+    if (r.error) throw r.error;
+  },
+  async history(id) {
+    const r = await sb.from("job_history").select("action,changed_by,changed_at,old_row,new_row").eq("job_id", id).order("changed_at", { ascending: false }).limit(25);
+    if (r.error) throw r.error; return r.data;
+  }
+};
+
+async function reload() {
+  try { await DB.loadAll(); setOnline(true); renderSoon(); }
+  catch (e) { setOnline(false); fail("Couldn't load jobs", e); }
+}
+let reloadT = null;
+function reloadSoon() { clearTimeout(reloadT); reloadT = setTimeout(reload, 350); }
+let pendingRender = false;
+function renderSoon() {
+  // don't yank a note box out from under someone typing in it
+  if (document.activeElement && document.activeElement.classList.contains("daynote")) { pendingRender = true; return; }
+  render();
+}
+function setOnline(v) { online = v; showBanner(); }
+
+let channel = null;
+function subscribe() {
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel("depot-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "job_prices" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "day_notes" }, reloadSoon)
+    .subscribe(status => { if (status === "SUBSCRIBED") { setOnline(true); reloadSoon(); } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setOnline(false); });
+}
+
+let noteT = null;
+function flushNotes() {
+  clearTimeout(noteT);
+  for (const d of [...dirtyNotes]) {
+    const text = dayNotes[d] || "";
+    DB.saveNote(d, text).then(() => { if ((dayNotes[d] || "") === text) dirtyNotes.delete(d); }).catch(e => fail("Note not saved", e));
+  }
+}
+function saveDayNotes() { clearTimeout(noteT); noteT = setTimeout(flushNotes, 600); }
+
+const ui = Object.assign({ wxPlace: "aspropyrgos", view: "board", panel: true, sort: "date", sortDir: 1, statusFilter: "active", project: "", weekStart: "", boardDate: "", theme: "" }, loadUi());
+const todayStr = () => DJ.ymd(new Date());
+if (!ui.boardDate) ui.boardDate = todayStr();
+if (!ui.weekStart) ui.weekStart = DJ.mondayOf(todayStr());
+
+/* ================= Helpers ================= */
+const $ = s => document.querySelector(s);
+const esc = DJ.esc;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600); }
+function showBanner() {
+  const b = $("#banner");
+  if (!online) { b.hidden = false; b.textContent = "No connection to the server. Changes you make now won't be saved — check the internet and reload."; }
+  else b.hidden = true;
+  const w = $("#who"); if (w) w.innerHTML = me ? '<span class="dot' + (online ? '' : ' off') + '"></span>' + esc(me.full_name || me.email) : "";
+}
+function hl(text, q) {
+  const s = esc(text); q = (q || "").trim(); if (!q) return s;
+  let out = s;
+  for (const w of q.split(/\s+/).filter(Boolean)) {
+    const ew = esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp("(" + ew + ")(?![^<]*>)", "gi"), "<mark>$1</mark>");
+  }
+  return out;
+}
+function fmtDate(s) { if (!s) return "No date"; const d = DJ.parseYmd(s); return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" }); }
+function pill(st) { return '<span class="pill p-' + st + '">' + DJ.STATUS_LABEL[st] + '</span>'; }
+function progress(j) { const n = j.checklist.length; if (!n) return ""; const d = j.checklist.filter(c => c.done).length; return '<span class="prog">☑ ' + d + '/' + n + '</span>'; }
+function cardHtml(j, q, draggable, compact) {
+  if (compact) {
+    const line = [j.time, j.client, j.truckPlate, j.pieces ? j.pieces + " pcs" : ""].filter(Boolean).join(" · ");
+    return '<div class="card compact st-' + j.status + '" data-id="' + esc(j.id) + '"' + (draggable ? ' draggable="true"' : '') + ' title="' + esc(DJ.STATUS_LABEL[j.status] + (j.cargoType ? " · " + j.cargoType : "") + (j.project ? " · " + j.project : "")) + '">' +
+      '<div class="t"><span>' + hl(DJ.title(j), q) + '</span>' + progress(j) + '</div><div class="m">' + hl(line, q) + '</div></div>';
+  }
+  const sub = [j.client, j.truckPlate, j.cargoType, j.weight ? Number(j.weight).toLocaleString() + " kg" : "", j.pieces ? Number(j.pieces).toLocaleString() + " pcs" : ""].filter(Boolean).join(" · ");
+  return '<div class="card st-' + j.status + (compact ? ' compact' : '') + '" data-id="' + esc(j.id) + '"' + (draggable ? ' draggable="true"' : '') + '>' +
+    '<div class="t"><span>' + hl(DJ.title(j), q) + '</span>' + pill(j.status) + '</div>' +
+    '<div class="m">' + hl(sub, q) + '</div>' +
+    (compact ? '<div class="m">' + (j.time ? esc(j.time) + ' · ' : '') + hl(j.project, q) + ' ' + progress(j) + '</div></div>' :
+    '<div class="m">' + esc(fmtDate(j.date)) + (j.time ? ' ' + esc(j.time) : '') + (j.project ? ' · ' + hl(j.project, q) : '') + ' ' + progress(j) + '</div></div>');
+}
+function byDate(a, b) { const x = (a.date || "9999") + (a.time || "99"), y = (b.date || "9999") + (b.time || "99"); return x < y ? -1 : x > y ? 1 : 0; }
+function download(name, blob) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
+
+/* ================= Weather ================= */
+let wx = { days: {}, fetchedAt: 0, place: "", error: "" };
+try { const c = JSON.parse(localStorage.getItem(WX_KEY) || "null"); if (c && c.days) wx = Object.assign(wx, c, { error: "" }); } catch (e) { }
+let wxLoading = false, wxPending = false, wxFailedAt = 0, wxFailedPlace = "";
+async function refreshWeather(force) {
+  const place = DJ.WX_PLACES[ui.wxPlace];
+  if (!place || wxLoading) return;
+  if (!force && wx.place === ui.wxPlace && Date.now() - wx.fetchedAt < 60 * 60 * 1000) return;
+  // after a failure, wait 10 minutes before trying again (otherwise every redraw would retry)
+  if (!force && wxFailedPlace === ui.wxPlace && Date.now() - wxFailedAt < 10 * 60 * 1000) return;
+  wxLoading = true;
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 10000);
+    const r = await fetch(DJ.wxUrl(place.lat, place.lon), { signal: ctl.signal, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
+    clearTimeout(t);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const days = DJ.wxParse(await r.json());
+    if (!Object.keys(days).length) throw new Error("empty forecast");
+    wx = { days, fetchedAt: Date.now(), place: ui.wxPlace, error: "" };
+    try { localStorage.setItem(WX_KEY, JSON.stringify(wx)); } catch (e) { }
+  } catch (e) {
+    wx.error = "Forecast unavailable (" + (e.name === "AbortError" ? "timed out" : e.message) + ")";
+    wxFailedAt = Date.now(); wxFailedPlace = ui.wxPlace;
+  } finally {
+    wxLoading = false;
+    if (ui.view === "week") { if (document.activeElement && document.activeElement.classList.contains("daynote")) wxPending = true; else render(); }
+  }
+}
+function wxHtml(day) {
+  if (!DJ.WX_PLACES[ui.wxPlace] || wx.place !== ui.wxPlace) return "";
+  const w = wx.days[day]; if (!w) return "";
+  const [ic, txt] = DJ.wxIcon(w.code), al = DJ.wxAlert(w);
+  const t = (w.tmax != null ? Math.round(w.tmax) + "°" : "") + (w.tmin != null ? " / " + Math.round(w.tmin) + "°" : "");
+  const rain = w.rainPct != null ? "💧" + Math.round(w.rainPct) + "%" + (w.rainMm ? " " + (+w.rainMm).toFixed(1) + "mm" : "") : "";
+  const wind = w.wind != null ? "💨" + Math.round(w.wind) + (w.gust != null ? "–" + Math.round(w.gust) : "") + " km/h" : "";
+  return '<div class="wx' + (al ? ' alert' : '') + '" title="' + esc(txt + (al ? " — " + al : "")) + '"><span class="ic">' + ic + '</span> ' + esc(t) + '<br>' + esc([rain, wind].filter(Boolean).join(" · ")) + (al ? '<br>⚠ ' + esc(al) : '') + '</div>';
+}
+
+/* ================= Side panel ================= */
+function renderSide() {
+  const q = $("#search").value;
+  const list = jobs.filter(j => j.status !== "done" && DJ.matches(j, q)).sort(byDate);
+  $("#sideCount").textContent = list.length + " open job" + (list.length === 1 ? "" : "s") + (q ? " matching" : "");
+  $("#sideList").innerHTML = list.length ? list.map(j => cardHtml(j, q)).join("") : '<div class="empty">' + (q ? "No open jobs match." : "No open jobs.") + '</div>';
+}
+
+/* ================= Views ================= */
+function renderAll() {
+  const q = $("#search").value;
+  let list = jobs.filter(j => DJ.matches(j, q));
+  if (ui.statusFilter === "active") list = list.filter(j => j.status !== "done");
+  else if (ui.statusFilter !== "all") list = list.filter(j => j.status === ui.statusFilter);
+  const k = ui.sort, dir = ui.sortDir;
+  list.sort((a, b) => {
+    let x = a[k] || "", y = b[k] || "";
+    if (k === "weight" || k === "pieces" || k === "price") { x = +x || 0; y = +y || 0; }
+    if (k === "status") { x = DJ.STATUSES.indexOf(a.status); y = DJ.STATUSES.indexOf(b.status); }
+    return (x < y ? -1 : x > y ? 1 : 0) * dir || byDate(a, b);
+  });
+  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
+  $("#main").innerHTML =
+    '<div class="toolbar"><h2>All jobs</h2><select id="statusFilter" aria-label="Status filter">' +
+    [["active", "Not done"], ["all", "All statuses"]].concat(DJ.STATUSES.map(s => [s, DJ.STATUS_LABEL[s]])).map(([v, l]) => '<option value="' + v + '"' + (ui.statusFilter === v ? " selected" : "") + '>' + l + '</option>').join("") +
+    '</select><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div><button id="exportAll">Export to Excel</button></div>' +
+    (list.length ? '<div class="tablewrap"><table><thead><tr>' + cols.map(([c, l]) => '<th data-sort="' + c + '">' + l + (ui.sort === c ? (dir > 0 ? " ▲" : " ▼") : "") + '</th>').join("") + '<th>☑</th></tr></thead><tbody>' +
+      list.map(j => '<tr class="row" data-id="' + esc(j.id) + '">' + cols.map(([c]) => '<td>' + (c === "status" ? pill(j.status) : c === "date" ? esc(j.date ? fmtDate(j.date) : "—") : (c === "weight" || c === "pieces") && j[c] ? esc(Number(j[c]).toLocaleString()) : c === "price" && j.price !== "" ? esc(Number(j.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : hl(j[c], q)) + '</td>').join("") + '<td>' + progress(j) + '</td></tr>').join("") +
+      '</tbody></table></div>' : '<div class="empty">No jobs here yet. Click “+ New job”, or ⋯ › Load demo data.</div>');
+  $("#statusFilter").onchange = e => { ui.statusFilter = e.target.value; saveUi(); render(); };
+  $("#main").querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => { const c = th.dataset.sort; if (ui.sort === c) ui.sortDir *= -1; else { ui.sort = c; ui.sortDir = 1; } saveUi(); render(); });
+  $("#exportAll").onclick = () => exportExcel(list, "Depot jobs " + todayStr(), "Jobs");
+}
+
+const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16]; // slots 08:00–17:00
+function slotOf(j) { if (!j.time) return ""; const h = +j.time.slice(0, 2); return HOURS.includes(h) ? String(h).padStart(2, "0") + ":00" : ""; }
+function renderWeek() {
+  const q = $("#search").value, start = ui.weekStart, today = todayStr();
+  const days = [...Array(7)].map((_, i) => DJ.addDays(start, i));
+  const end = days[6];
+  const inWeek = jobs.filter(j => j.date >= start && j.date <= end && DJ.matches(j, q)).sort(byDate);
+  const undated = jobs.filter(j => !j.date && j.status !== "done" && DJ.matches(j, q));
+  const cell = (d, slot) => '<div class="slot' + (slot ? '' : ' notime') + (d === today ? ' today' : '') + '" data-day="' + d + '" data-time="' + slot + '">' +
+    inWeek.filter(j => j.date === d && slotOf(j) === slot).map(j => cardHtml(j, q, true, true)).join("") + '</div>';
+  let grid = '<div></div>' + days.map(d => '<div class="wh' + (d === today ? ' today' : '') + '"><h3><span>' + esc(fmtDate(d)) + '</span><span style="color:var(--muted)">' + inWeek.filter(j => j.date === d).length + '</span></h3>' + wxHtml(d) + '</div>').join("");
+  grid += '<div class="hr" title="No time, or outside 08:00–17:00">Other</div>' + days.map(d => cell(d, "")).join("");
+  for (const h of HOURS) { const sl = String(h).padStart(2, "0") + ":00"; grid += '<div class="hr">' + sl + '</div>' + days.map(d => cell(d, sl)).join(""); }
+  grid += '<div class="hr">Notes</div>' + days.map(d => '<div class="notes"><textarea class="daynote" data-day="' + d + '" maxlength="4000" placeholder="Notes for this day…" aria-label="Notes for ' + esc(fmtDate(d)) + '">' + esc(dayNotes[d] || "") + '</textarea></div>').join("");
+  $("#main").innerHTML =
+    '<div class="toolbar"><h2>Week</h2><button id="wPrev" aria-label="Previous week">‹</button><button id="wToday">This week</button><button id="wNext" aria-label="Next week">›</button>' +
+    '<strong>' + esc(fmtDate(start)) + ' – ' + esc(fmtDate(end)) + '</strong><span style="color:var(--muted)">Drag a job to a day and hour · click an empty slot to add a job there</span><div class="spacer"></div>' +
+    '<label style="margin:0;display:flex;gap:6px;align-items:center">Weather <select id="wxPlace">' + [["", "Off"]].concat(Object.entries(DJ.WX_PLACES).map(([k, v]) => [k, v.name])).map(([k, v]) => '<option value="' + k + '"' + (ui.wxPlace === k ? ' selected' : '') + '>' + esc(v) + '</option>').join("") + '</select></label>' +
+    (ui.wxPlace ? '<span style="color:var(--muted);font-size:12px">' + esc(wx.error || (wxLoading ? "Loading forecast…" : wx.fetchedAt && wx.place === ui.wxPlace ? "Open-Meteo, updated " + new Date(wx.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "")) + '</span>' : '') + '</div>' +
+    '<div class="wgrid">' + grid + '</div>' +
+    (undated.length ? '<h3 style="margin:16px 0 8px;font-size:14px">Open jobs without a date (' + undated.length + ')</h3><div style="max-width:400px">' + undated.map(j => cardHtml(j, q, true)).join("") + '</div>' : '');
+  $("#wPrev").onclick = () => { ui.weekStart = DJ.addDays(ui.weekStart, -7); saveUi(); render(); };
+  $("#wNext").onclick = () => { ui.weekStart = DJ.addDays(ui.weekStart, 7); saveUi(); render(); };
+  $("#wToday").onclick = () => { ui.weekStart = DJ.mondayOf(todayStr()); saveUi(); render(); };
+  $("#wxPlace").onchange = e => { ui.wxPlace = e.target.value; saveUi(); render(); refreshWeather(true); };
+  $("#main").querySelectorAll(".daynote").forEach(ta => {
+    ta.addEventListener("input", () => { const d = ta.dataset.day; if (ta.value.trim()) dayNotes[d] = ta.value; else delete dayNotes[d]; dirtyNotes.add(d); saveDayNotes(); });
+    ta.addEventListener("blur", () => { flushNotes(); if (wxPending || pendingRender) { wxPending = false; setTimeout(() => { if (!(document.activeElement && document.activeElement.classList.contains("daynote"))) render(); }, 150); } });
+  });
+  $("#main").querySelectorAll(".slot").forEach(sl => sl.addEventListener("click", e => { if (!e.target.closest(".card")) openEditor(null, { date: sl.dataset.day, time: sl.dataset.time }); }));
+  refreshWeather(false);
+  wireDrag(".slot", (job, el) => {
+    job.date = el.dataset.day;
+    // "Other" row keeps a time outside working hours, clears one inside them
+    if (el.dataset.time) job.time = el.dataset.time; else if (slotOf(job)) job.time = "";
+    if (job.status === "open") job.status = "scheduled";
+  });
+}
+
+function renderBoard() {
+  const q = $("#search").value, d = ui.boardDate;
+  const list = jobs.filter(j => j.date === d && DJ.matches(j, q));
+  $("#main").innerHTML =
+    '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button>' +
+    '<span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' · drag a card to change its status</span></div>' +
+    '<div class="board">' + DJ.STATUSES.map(s => {
+      const l = list.filter(j => j.status === s).sort(byDate);
+      return '<div class="col" data-status="' + s + '"><h3><span class="p-' + s + '">' + DJ.STATUS_LABEL[s] + '</span><span style="color:var(--muted)">' + l.length + '</span></h3>' + l.map(j => cardHtml(j, q, true)).join("") + '</div>';
+    }).join("") + '</div>';
+  const setD = v => { if (v) { ui.boardDate = v; saveUi(); render(); } };
+  $("#bDate").onchange = e => setD(e.target.value);
+  $("#bPrev").onclick = () => setD(DJ.addDays(ui.boardDate, -1));
+  $("#bNext").onclick = () => setD(DJ.addDays(ui.boardDate, 1));
+  $("#bToday").onclick = () => setD(todayStr());
+  wireDrag(".col", (job, el) => { const st = el.dataset.status; job.status = st; if (st === "done" && job.checklist.some(c => !c.done)) toast("Marked done — some checklist steps are still unticked"); });
+}
+
+function renderProjects() {
+  const q = $("#search").value;
+  const names = [...new Set(jobs.map(j => j.project.trim()))].sort((a, b) => a === "" ? 1 : b === "" ? -1 : a.localeCompare(b));
+  if (ui.project && !names.includes(ui.project)) ui.project = "";
+  const sel = ui.project || names.find(n => n) || (names.length ? "" : null);
+  const list = sel === null ? [] : jobs.filter(j => j.project.trim() === sel && DJ.matches(j, q)).sort(byDate);
+  const count = n => jobs.filter(j => j.project.trim() === n && j.status !== "done").length + "/" + jobs.filter(j => j.project.trim() === n).length;
+  $("#main").innerHTML = '<div class="projects"><div class="plist"><div class="toolbar"><h2>Projects</h2></div>' +
+    (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + '"><span>' + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
+    '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div><button id="exportProj" class="primary">Export to Excel</button></div>' +
+      (list.length ? '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Status</th><th>Client</th><th>Shipping cont.</th><th>HCT cont.</th><th>Truck</th><th>Cargo</th><th>Weight</th><th>Pieces</th><th>Ref</th><th>☑</th></tr></thead><tbody>' +
+        list.map(j => '<tr class="row" data-id="' + esc(j.id) + '"><td>' + esc(j.date ? fmtDate(j.date) + (j.time ? " " + j.time : "") : "—") + '</td><td>' + pill(j.status) + '</td><td>' + hl(j.client, q) + '</td><td>' + hl(j.shippingContainer, q) + '</td><td>' + hl(j.hctContainer, q) + '</td><td>' + hl(j.truckPlate, q) + '</td><td>' + hl(j.cargoType, q) + '</td><td>' + (j.weight ? esc(Number(j.weight).toLocaleString()) : "") + '</td><td>' + (j.pieces ? esc(Number(j.pieces).toLocaleString()) : "") + '</td><td>' + hl(j.ref, q) + '</td><td>' + progress(j) + '</td></tr>').join("") +
+        '</tbody></table></div>' + (list.length ? '<p style="color:var(--muted);font-size:12px">Total weight: ' + list.reduce((a, j) => a + (+j.weight || 0), 0).toLocaleString() + ' kg · Total pieces: ' + list.reduce((a, j) => a + (+j.pieces || 0), 0).toLocaleString() + (seesPrices() ? ' · Total price: € ' + list.reduce((a, j) => a + (+j.price || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '') + '</p>' : '') : '<div class="empty">No jobs match.</div>') : '') + '</div></div>';
+  $("#main").querySelectorAll("[data-p]").forEach(b => b.onclick = () => { ui.project = b.dataset.p; saveUi(); render(); });
+  const ex = $("#exportProj"); if (ex) ex.onclick = () => exportExcel(list, (sel || "No project") + " " + todayStr(), sel || "No project");
+}
+
+function wireDrag(sel, apply) {
+  const main = $("#main");
+  main.querySelectorAll('.card[draggable]').forEach(c => c.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; }));
+  main.querySelectorAll(sel).forEach(col => {
+    col.addEventListener("dragover", e => { e.preventDefault(); col.classList.add("dragover"); });
+    col.addEventListener("dragleave", () => col.classList.remove("dragover"));
+    col.addEventListener("drop", e => {
+      e.preventDefault(); col.classList.remove("dragover");
+      const job = jobs.find(j => j.id === e.dataTransfer.getData("text/plain")); if (!job) return;
+      const before = { date: job.date, time: job.time, status: job.status };
+      apply(job, col); render();
+      DB.patchJob(job).catch(err => { Object.assign(job, before); render(); fail("Move not saved", err); });
+    });
+  });
+}
+
+function render() {
+  pendingRender = false;
+  if (!me || !loaded) return;
+  $("#navUsers").hidden = !isAdmin();
+  document.querySelectorAll(".admin-only").forEach(e => e.hidden = !isAdmin());
+  document.querySelectorAll(".price-only").forEach(e => e.hidden = !seesPrices());
+  if (ui.view === "users" && !isAdmin()) ui.view = "board";
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === ui.view));
+  $("#panel").classList.toggle("hidden", !ui.panel);
+  ({ all: renderAll, week: renderWeek, board: renderBoard, projects: renderProjects, users: renderUsers }[ui.view] || renderBoard)();
+  renderSide();
+  refreshDatalists();
+}
+
+function refreshDatalists() {
+  for (const k of ["client", "project", "transporter", "cargoType", "truckPlate"]) {
+    const vals = [...new Set(jobs.map(j => j[k]).filter(Boolean))].sort().slice(0, 300);
+    $("#dl_" + k).innerHTML = vals.map(v => '<option value="' + esc(v) + '">').join("");
+  }
+}
+
+/* ================= Export / backup ================= */
+function exportExcel(list, fileBase, sheet) {
+  if (!list.length) { toast("Nothing to export"); return; }
+  let rows = DJ.jobsToRows(list.slice().sort(byDate));
+  if (!seesPrices()) { const pi = rows[0].indexOf("Price (€)"); rows = rows.map(r => r.filter((_, i) => i !== pi)); }
+  const bytes = DJ.xlsx(rows, sheet);
+  download(fileBase.replace(/[\\\/:*?"<>|]/g, "-") + ".xlsx", new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  toast("Exported " + list.length + " job" + (list.length === 1 ? "" : "s"));
+}
+function backup() {
+  const out = { version: 2, saved: new Date().toISOString(), jobs: jobs.map(j => { const c = Object.assign({}, j); if (!seesPrices()) delete c.price; return c; }), dayNotes };
+  download("depot-jobs-copy-" + todayStr() + ".json", new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+}
+// Admin only: bring jobs from the offline demo (or a copy) into the shared database as NEW jobs.
+$("#fileRestore").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f || !isAdmin()) return;
+  if (f.size > 20 * 1024 * 1024) { toast("That file is too big"); return; }
+  let d; try { d = JSON.parse(await f.text()); if (!d || !Array.isArray(d.jobs)) throw 0; } catch (err) { toast("That doesn't look like a Depot Job Tracker file"); return; }
+  const incoming = d.jobs.map(DJ.cleanJob);
+  if (!confirm("Add " + incoming.length + " job(s) from this file to the shared list? Everyone will see them. (Nothing existing is changed.)")) return;
+  let ok = 0;
+  for (const j of incoming) { try { await DB.saveJob(Object.assign({}, j, { id: "" }), null); ok++; } catch (err) { fail("Import stopped", err); break; } }
+  if (d.dayNotes) for (const [day, text] of Object.entries(cleanDayNotes(d.dayNotes))) if (!dayNotes[day]) { try { await DB.saveNote(day, text); } catch (err) { } }
+  await reload(); toast("Imported " + ok + " job(s)");
+};
+
+/* ================= Users (admin) ================= */
+function renderUsers() {
+  // test logins used by the database rule tests end in .invalid and can't sign in; keep them out of the way
+  const list = Object.values(people).filter(p => !/\.invalid$/.test(p.email)).sort((a, b) => (b.active - a.active) || (a.full_name || a.email).localeCompare(b.full_name || b.email));
+  $("#main").innerHTML = '<div class="toolbar"><h2>Users</h2><span style="color:var(--muted)">New logins are made in the Supabase dashboard (Authentication › Users › Add user). They appear here switched off until you tick Active.</span></div>' +
+    '<div class="tablewrap"><table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th></tr></thead><tbody>' +
+    list.map(p => '<tr data-uid="' + esc(p.id) + '"><td>' + esc(p.email) + '</td><td><input data-k="full_name" value="' + esc(p.full_name) + '" maxlength="120"></td><td><select data-k="role">' +
+      [["office", "Office (sees prices)"], ["depot", "Depot (no prices)"], ["admin", "Admin"]].map(([v, l]) => '<option value="' + v + '"' + (p.role === v ? ' selected' : '') + '>' + l + '</option>').join("") +
+      '</select></td><td><input type="checkbox" data-k="active"' + (p.active ? ' checked' : '') + (p.id === me.id ? ' disabled' : '') + ' style="width:auto"></td></tr>').join("") + '</tbody></table></div>';
+  $("#main").querySelectorAll("tr[data-uid] [data-k]").forEach(el => el.addEventListener("change", async () => {
+    const id = el.closest("tr").dataset.uid, k = el.dataset.k, v = el.type === "checkbox" ? el.checked : el.value;
+    const r = await sb.from("profiles").update({ [k]: v }).eq("id", id).select();
+    if (r.error || !r.data.length) { fail("Not saved", r.error); } else { people[id] = r.data[0]; toast("Saved"); }
+    await reload();
+  }));
+}
+
+/* ================= Job editor ================= */
+let editing = null, editingFrom = null, draftChecks = [], saving = false;
+function openEditor(id, preset) {
+  const j = id ? jobs.find(x => x.id === id) : null;
+  editing = j ? j.id : null;
+  $("#dlgTitle").textContent = j ? "Edit job" : "New job";
+  $("#btnDelete").hidden = !j;
+  const base = j || Object.assign({ status: "open", date: ui.view === "board" ? ui.boardDate : "", project: ui.view === "projects" ? ui.project : "" }, preset || {});
+  if (!j && preset && preset.date) base.status = "scheduled";
+  for (const [k] of DJ.FIELDS) $("#f_" + k).value = base[k] == null ? "" : base[k];
+  $("#f_status").value = base.status || "open";
+  editingFrom = j ? j.updated : null;
+  draftChecks = (j ? j.checklist : []).map(c => ({ ...c }));
+  $("#jobMeta").innerHTML = j ? '<div class="meta">Added by ' + esc(personName(j.createdBy)) + ' · last changed by ' + esc(personName(j.updatedBy)) + ', ' + esc(new Date(j.updated).toLocaleString()) + ' · <a href="#" id="showHist">show changes</a></div><div class="hist" id="hist" hidden></div>' : "";
+  const sh = $("#showHist"); if (sh) sh.onclick = async ev => { ev.preventDefault(); const h = $("#hist"); h.hidden = false; h.textContent = "Loading…";
+    try { const rows = await DB.history(j.id); h.innerHTML = rows.map(r => '<div>' + esc(new Date(r.changed_at).toLocaleString()) + ' · <b>' + esc(personName(r.changed_by)) + '</b> · ' + esc(r.action === "update" ? "changed " + (DJ.changedFields(r.old_row, r.new_row).join(", ") || "nothing visible") : r.action.replace("price-", "price ")) + '</div>').join("") || "No changes recorded."; }
+    catch (e) { h.textContent = "Couldn't load changes."; } };
+  renderChecks();
+  ["shippingContainer", "hctContainer"].forEach(k => $("#h_" + k).textContent = DJ.containerWarning($("#f_" + k).value));
+  $("#dlg").showModal();
+  $("#f_client").focus();
+}
+function renderChecks() {
+  $("#checkList").innerHTML = draftChecks.map((c, i) => '<div class="ci' + (c.done ? ' done' : '') + '"><input type="checkbox" data-i="' + i + '"' + (c.done ? ' checked' : '') + ' aria-label="Done"><input type="text" data-i="' + i + '" value="' + esc(c.text) + '" maxlength="300" placeholder="Step"><button type="button" class="ghost" data-del="' + i + '" aria-label="Remove step">✕</button></div>').join("");
+}
+$("#checkList").addEventListener("input", e => { const i = +e.target.dataset.i; if (e.target.type === "text") draftChecks[i].text = e.target.value; });
+$("#checkList").addEventListener("change", e => { const i = +e.target.dataset.i; if (e.target.type === "checkbox") { draftChecks[i].done = e.target.checked; e.target.parentElement.classList.toggle("done", e.target.checked); } });
+$("#checkList").addEventListener("click", e => { const d = e.target.dataset.del; if (d != null) { draftChecks.splice(+d, 1); renderChecks(); } });
+$("#checkList").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.type === "text") { e.preventDefault(); $("#btnAddCheck").click(); } });
+$("#btnAddCheck").onclick = () => { draftChecks.push({ text: "", done: false }); renderChecks(); const ins = $("#checkList").querySelectorAll('input[type=text]'); ins[ins.length - 1].focus(); };
+["shippingContainer", "hctContainer"].forEach(k => $("#f_" + k).addEventListener("input", e => $("#h_" + k).textContent = DJ.containerWarning(e.target.value)));
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => $("#dlg").close());
+$("#jobForm").addEventListener("submit", async e => {
+  e.preventDefault(); if (saving) return;
+  const data = {}; for (const [k] of DJ.FIELDS) data[k] = $("#f_" + k).value;
+  data.status = $("#f_status").value; data.checklist = draftChecks;
+  if (!seesPrices()) data.price = "";
+  if (!DJ.FIELDS.some(([k]) => String(data[k]).trim())) { toast("Fill in at least one field"); return; }
+  saving = true; $("#btnSave").disabled = true;
+  try {
+    let r = await DB.saveJob(Object.assign({}, data, { id: editing || "" }), editingFrom);
+    if (r.conflict) {
+      const cur = jobs.find(x => x.id === editing);
+      if (!confirm("Someone else changed this job while you had it open" + (cur ? " (" + personName(cur.updatedBy) + ")" : "") + ".\n\nOK = save your version over theirs\nCancel = keep theirs (your edits are dropped)")) { $("#dlg").close(); await reload(); return; }
+      r = await DB.saveJob(Object.assign({}, data, { id: editing }), null, true);
+    }
+    $("#dlg").close(); toast("Saved"); await reload();
+  } catch (err) { fail("Not saved", err); }
+  finally { saving = false; $("#btnSave").disabled = false; }
+});
+$("#btnDelete").onclick = async () => {
+  const j = jobs.find(x => x.id === editing); if (!j) return;
+  if (!confirm("Delete job “" + DJ.title(j) + "” for everyone? This can't be undone.")) return;
+  try { await DB.deleteJob(editing); $("#dlg").close(); toast("Deleted"); await reload(); } catch (err) { fail("Not deleted", err); }
+};
+
+/* ================= Wiring ================= */
+document.addEventListener("click", e => {
+  const card = e.target.closest(".card,tr.row"); if (card && card.dataset.id) { openEditor(card.dataset.id); return; }
+  if (!e.target.closest(".menu")) $("#menuList").classList.remove("open");
+});
+$("#nav").onclick = e => { const v = e.target.dataset.view; if (v) { ui.view = v; saveUi(); render(); } };
+$("#btnPanel").onclick = () => { ui.panel = !ui.panel; saveUi(); render(); };
+$("#btnNew").onclick = () => openEditor(null);
+$("#search").addEventListener("input", () => render());
+$("#btnMenu").onclick = () => $("#menuList").classList.toggle("open");
+$("#menuList").onclick = e => {
+  const a = e.target.dataset.act; if (!a) return; $("#menuList").classList.remove("open");
+  if (a === "backup") backup();
+  if (a === "restore") $("#fileRestore").click();
+  if (a === "signout") { sb.auth.signOut(); }
+  if (a === "name") { const n = prompt("Your name, as others will see it:", me.full_name || ""); if (n != null) sb.from("profiles").update({ full_name: n.trim().slice(0, 120) }).eq("id", me.id).select().then(r => { if (r.error) fail("Not saved", r.error); else { toast("Saved"); reload(); } }); }
+  if (a === "password") { const p1 = prompt("New password (at least 10 characters):"); if (!p1) return; if (p1.length < 10) { toast("Too short — use at least 10 characters"); return; } const p2 = prompt("Type it again:"); if (p1 !== p2) { toast("The two didn't match"); return; } sb.auth.updateUser({ password: p1 }).then(r => r.error ? fail("Password not changed", r.error) : toast("Password changed")); }
+  if (a === "theme") { const dark = ui.theme ? ui.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; ui.theme = dark ? "light" : "dark"; document.documentElement.dataset.theme = ui.theme; saveUi(); }
+  if (a === "selftest") { const r = selfTest(); alert(r.failed.length ? "Self-test: " + r.failed.length + " FAILED of " + r.total + "\n\n" + r.failed.join("\n") : "Self-test: all " + r.total + " checks passed."); }
+};
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !$("#dlg").open) { e.preventDefault(); if (!ui.panel) { ui.panel = true; render(); } $("#search").focus(); }
+  if (e.key.toLowerCase() === "n" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !$("#dlg").open && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openEditor(null); }
+});
+window.addEventListener("online", () => { subscribe(); reloadSoon(); });
+window.addEventListener("offline", () => setOnline(false));
+window.addEventListener("beforeunload", e => { if (dirtyNotes.size) { flushNotes(); e.preventDefault(); e.returnValue = ""; } });
+
+/* ================= Self-test ================= */
+function selfTest() {
+  const failed = []; let total = 0;
+  const ok = (name, cond) => { total++; if (!cond) failed.push("✗ " + name); };
+  ok("check digit valid CSQU3054383", DJ.containerWarning("CSQU3054383") === "");
+  ok("check digit valid MSKU9070323", DJ.containerWarning("MSKU9070323") === "");
+  ok("check digit wrong ABCD1234567", DJ.containerWarning("ABCD1234567") !== "");
+  ok("format warning", DJ.containerWarning("ABC123") !== "");
+  ok("empty container no warning", DJ.containerWarning("") === "");
+  ok("container normalised", DJ.normContainer(" csqu 305438-3 ") === "CSQU3054383");
+  ok("monday of Sunday 2026-10-25", DJ.mondayOf("2026-10-25") === "2026-10-19");
+  ok("monday of Monday", DJ.mondayOf("2026-10-19") === "2026-10-19");
+  ok("addDays over month end", DJ.addDays("2026-10-31", 1) === "2026-11-01");
+  ok("addDays over DST change", DJ.addDays("2026-10-24", 2) === "2026-10-26");
+  ok("escape html", DJ.esc('<img src=x onerror="a">') === "&lt;img src=x onerror=&quot;a&quot;&gt;");
+  ok("search all words", DJ.matches({ client: "Acme", truckPlate: "ZKH 1", checklist: [] }, "acme zkh"));
+  ok("search miss", !DJ.matches({ client: "Acme", checklist: [] }, "acme beta"));
+  ok("search checklist", DJ.matches({ checklist: [{ text: "seal photo" }] }, "seal"));
+  const c = DJ.cleanJob({ status: "bogus", weight: "-5", date: "20/10/2026", checklist: [{ text: " " }, { text: "a", done: 1 }] });
+  ok("clean status", c.status === "open");
+  ok("clean weight", c.weight === "0");
+  ok("clean bad date", c.date === "");
+  ok("clean checklist", c.checklist.length === 1 && c.checklist[0].done === true);
+  ok("crc32 'hello'", DJ.crc32(new TextEncoder().encode("hello")) === 0x3610a686);
+  ok("colName", DJ.colName(0) === "A" && DJ.colName(25) === "Z" && DJ.colName(26) === "AA");
+  const x = DJ.xlsx(DJ.jobsToRows([DJ.cleanJob({ client: "A & <B>", weight: 100 })]), "T");
+  ok("xlsx is a zip", x[0] === 0x50 && x[1] === 0x4b);
+  ok("xlsx ends with EOCD", new DataView(x.buffer).getUint32(x.length - 22, true) === 0x06054b50);
+  const txt = new TextDecoder().decode(x);
+  ok("xlsx escapes text", txt.includes("A &amp; &lt;B&gt;"));
+  ok("xlsx weight numeric", txt.includes("<v>100</v>"));
+  const c2 = DJ.cleanJob({ pieces: "12.4" });
+  ok("clean pieces", c2.pieces === "12");
+  ok("pieces in export header", DJ.jobsToRows([])[0].includes("Pieces"));
+  const w = DJ.wxParse({ daily: { time: ["2026-10-20", "bad"], weather_code: [61, 0], temperature_2m_max: [21.4, 1], temperature_2m_min: [14, 1], precipitation_probability_max: [80, 1], precipitation_sum: [3.2, 0], wind_speed_10m_max: [20, 1], wind_gusts_10m_max: [55, 1] } });
+  ok("weather parse", w["2026-10-20"] && w["2026-10-20"].tmax === 21.4 && !w.bad);
+  ok("weather parse junk", Object.keys(DJ.wxParse({ daily: { time: "x" } })).length === 0);
+  ok("weather icon rain", DJ.wxIcon(61)[1] === "Rain");
+  ok("weather alert", DJ.wxAlert(w["2026-10-20"]) === "strong gusts, rain likely");
+  ok("weather no alert", DJ.wxAlert({ gust: 20, rainPct: 10, code: 1 }) === "");
+  ok("clean time", DJ.cleanJob({ time: "09:30" }).time === "09:30" && DJ.cleanJob({ time: "25:00" }).time === "" && DJ.cleanJob({ time: "9am" }).time === "");
+  ok("weather url", DJ.wxUrl(38.0617, 23.5877).startsWith("https://api.open-meteo.com/v1/forecast?latitude=38.0617&longitude=23.5877"));
+  const row = DJ.toRow({ shippingContainer: "csqu3054383", weight: "", pieces: "5", date: "", time: "09:15", price: "12.5" });
+  ok("toRow maps names", row.shipping_container === "CSQU3054383" && row.weight === null && row.pieces === 5 && row.job_date === null && row.job_time === "09:15" && !("price" in row));
+  const back = DJ.fromRow({ id: "x", shipping_container: "A", weight: 7, pieces: null, job_date: "2026-10-20", job_time: "09:15:00", status: "done", checklist: [], client: "", hct_container: "", truck_plate: "", transporter: "", cargo_type: "", project: "", ref: "", notes: "" }, { price: 99.9 });
+  ok("fromRow maps back", back.time === "09:15" && back.weight === "7" && back.pieces === "" && back.price === "99.9" && back.status === "done");
+  ok("changedFields", DJ.changedFields({ status: "open", client: "a" }, { status: "done", client: "a" }).join() === "Status");
+  return { total, failed };
+}
+
+/* ================= Start ================= */
+if (ui.theme) document.documentElement.dataset.theme = ui.theme;
+if (window.innerWidth < 760) ui.panel = false;
+
+/* ---- sign-in gate ---- */
+function gate(msg, showLogin) {
+  $("#gate").hidden = false; $("#gateMsg").textContent = msg;
+  $("#loginFields").hidden = !showLogin; $("#lg_btn").hidden = !showLogin; $("#lg_out").hidden = showLogin;
+}
+$("#lg_out").onclick = () => sb.auth.signOut();
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault(); $("#lg_err").textContent = ""; $("#lg_btn").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("#lg_email").value.trim(), password: $("#lg_pw").value });
+  $("#lg_btn").disabled = false;
+  if (error) $("#lg_err").textContent = error.message === "Invalid login credentials" ? "Wrong email or password." : error.message;
+  else $("#lg_pw").value = "";
+});
+let startedFor = null;
+async function start(session) {
+  if (!session) { me = null; startedFor = null; loaded = false; if (channel) { sb.removeChannel(channel); channel = null; } jobs = []; $("#main").innerHTML = ""; showBanner(); gate("Sign in with the login George gave you.", true); return; }
+  if (startedFor === session.user.id) return;
+  startedFor = session.user.id;
+  const r = await sb.from("profiles").select("id,email,full_name,role,active").eq("id", session.user.id).maybeSingle();
+  if (r.error) { startedFor = null; gate("Couldn't reach the server: " + r.error.message, false); return; }
+  if (!r.data || !r.data.active) { gate("You're signed in as " + session.user.email + ", but George still has to switch your login on. Try again later.", false); startedFor = null; return; }
+  me = r.data; $("#gate").hidden = true; showBanner();
+  await reload(); subscribe();
+}
+sb.auth.onAuthStateChange((event, session) => { setTimeout(() => start(session), 0); });
+
+</script>
+</body>
+</html>

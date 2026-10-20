@@ -1,0 +1,3 @@
+node_modules/
+tests/ui/out.xlsx
+tests/ui/*.png
