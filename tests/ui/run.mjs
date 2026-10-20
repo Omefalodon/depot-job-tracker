@@ -83,13 +83,18 @@ await G.waitForTimeout(900);
 log('files in db:', db.job_files.map(f => f.name).join(' | '), '| objects:', Object.keys(objects).length, '| ascii keys:', Object.keys(objects).every(k => /^[A-Za-z0-9_./-]+$/.test(k)));
 log('editor lists:', await G.locator('#fileList .fi').count());
 await G.locator('#drop').scrollIntoViewIfNeeded(); await G.screenshot({ path: new URL('./g-editor.png', import.meta.url).pathname });
-const [pop] = await Promise.all([G.waitForEvent('popup'), G.locator('#fileList [data-open="0"]').click()]); await pop.waitForLoadState(); log('open in new tab:', pop.url().startsWith('https://files.test/sign/'), 'opener cut:', await pop.evaluate(() => window.opener === null)); await pop.close();
+const [pop] = await Promise.all([G.waitForEvent('popup'), G.locator('#fileList [data-open="0"]').click()]); await pop.waitForURL(/files\.test/); log('open in new tab:', pop.url().startsWith('https://files.test/sign/'), 'opener cut:', await pop.evaluate(() => window.opener === null)); await pop.close();
 const [fdl] = await Promise.all([G.waitForEvent('download'), G.locator('#fileList [data-dl="1"]').click()]); log('download:', fdl.url().includes('download=photo.png'));
 await G.click('#jobForm [data-close]'); await M.waitForTimeout(700);
 log('maria card shows clip:', (await M.textContent('#sideList')).includes('📎 2'));
 // drop a file straight onto a card on Maria's screen
 await M.evaluate(() => { const c = document.querySelector('#sideList .card'); const dt = new DataTransfer(); dt.items.add(new File(['hello'], 'delivery note.txt', { type: 'text/plain' })); for (const t of ['dragover', 'drop']) c.dispatchEvent(new DragEvent(t, { bubbles: true, cancelable: true, dataTransfer: dt })); });
 await M.waitForTimeout(800); log('dropped on card:', db.job_files.length, db.job_files.at(-1).name, 'by', db.job_files.at(-1).uploaded_by);
+// drop a file onto the open editor: the browser must be told "copy" (a "none" here was the bug George hit)
+await M.locator('#sideList .card').first().click();
+const eff = await M.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File(['scan'], 'scan.pdf', { type: 'application/pdf' })); let fx = 'unset'; Object.defineProperty(dt, 'dropEffect', { get: () => fx, set: v => { fx = v; } }); const z = document.querySelector('#drop'); z.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt })); const a = dt.dropEffect; const g = document.querySelector('#f_notes'); g.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt })); const b = dt.dropEffect; g.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); return a + '/' + b; });
+await M.waitForTimeout(800); log('editor drop effect (box/field):', eff, '| dropped in editor:', db.job_files.at(-1).name, db.job_files.length);
+await M.locator('#fileList [data-fdel="3"]').click(); await M.waitForTimeout(600); await M.click('#jobForm [data-close]');
 // remove one
 await M.locator('#sideList .card').first().click(); await M.locator('#fileList [data-fdel="2"]').click(); await M.waitForTimeout(600);
 log('after remove:', db.job_files.length, Object.keys(objects).length); await M.click('#jobForm [data-close]');

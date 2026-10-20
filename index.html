@@ -232,7 +232,7 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
         </div>
         <div class="wide price-only">
           <label>Attachments</label>
-          <div class="drop" id="drop">Drop files here or <button type="button" class="link" id="btnPick">choose files</button><br><span style="font-size:11px">PDF, photos, Word, Excel, e-mails (.msg/.eml), zip · up to 25 MB each</span></div>
+          <div class="drop" id="drop">Drop files anywhere on this job, or <button type="button" class="link" id="btnPick">choose files</button><br><span style="font-size:11px">PDF, photos, Word, Excel, e-mails (.msg/.eml), zip · up to 25 MB each</span></div>
           <div class="flist" id="fileList"></div>
           <input type="file" id="filePick" multiple hidden>
         </div>
@@ -948,9 +948,6 @@ function addFiles(list) {
 }
 $("#btnPick").onclick = () => $("#filePick").click();
 $("#filePick").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
-$("#drop").addEventListener("dragover", e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; $("#drop").classList.add("dragover"); });
-$("#drop").addEventListener("dragleave", () => $("#drop").classList.remove("dragover"));
-$("#drop").addEventListener("drop", e => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); $("#drop").classList.remove("dragover"); addFiles(e.dataTransfer.files); });
 $("#fileList").addEventListener("click", async e => {
   const t = e.target.closest("[data-open],[data-dl],[data-fdel]"); if (!t) return; e.preventDefault();
   const list = editing ? (files[editing] || []) : pendingFiles;
@@ -964,19 +961,26 @@ $("#fileList").addEventListener("click", async e => {
   const f = list[+(t.dataset.open != null ? t.dataset.open : t.dataset.dl)];
   if (f && editing) openFile(f, t.dataset.dl != null);
 });
-// Drop files straight onto a job card; anywhere else a dropped file is ignored instead of the browser opening it.
-function clearFileDrop(except) { document.querySelectorAll(".card.filedrop").forEach(c => c !== except && c.classList.remove("filedrop")); }
+// One place decides where dropped files go: anywhere on the open job editor, or onto a job card.
+// Anywhere else a dropped file is ignored instead of the browser opening it.
+function clearFileDrop(except) { document.querySelectorAll(".card.filedrop").forEach(c => c !== except && c.classList.remove("filedrop")); if (!except || except.id !== "drop") $("#drop").classList.remove("dragover"); }
+function fileDropTarget(e) {
+  if (!seesPrices()) return null;
+  if ($("#dlg").open) return e.target.closest("#dlg") ? $("#drop") : null;
+  return e.target.closest(".card[data-id]");
+}
 document.addEventListener("dragover", e => {
   if (!hasFiles(e)) return; e.preventDefault();
-  const c = !$("#dlg").open && seesPrices() ? e.target.closest(".card[data-id]") : null;
-  clearFileDrop(c); if (c) c.classList.add("filedrop");
-  e.dataTransfer.dropEffect = c ? "copy" : "none";
+  const t = fileDropTarget(e);
+  clearFileDrop(t); if (t) t.classList.add(t.id === "drop" ? "dragover" : "filedrop");
+  e.dataTransfer.dropEffect = t ? "copy" : "none";
 });
 document.addEventListener("dragleave", e => { if (!e.relatedTarget) clearFileDrop(null); });
 document.addEventListener("drop", e => {
-  if (!hasFiles(e)) return; e.preventDefault(); clearFileDrop(null);
-  const c = !$("#dlg").open && seesPrices() ? e.target.closest(".card[data-id]") : null; if (!c) return;
-  const ok = checkFiles(e.dataTransfer.files); if (ok.length) uploadMany(c.dataset.id, ok);
+  if (!hasFiles(e)) return; e.preventDefault();
+  const t = fileDropTarget(e); clearFileDrop(null); if (!t) return;
+  if (t.id === "drop") addFiles(e.dataTransfer.files);
+  else { const ok = checkFiles(e.dataTransfer.files); if (ok.length) uploadMany(t.dataset.id, ok); }
 });
 
 function renderChecks() {
