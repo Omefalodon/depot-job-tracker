@@ -137,6 +137,21 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
 .hist div{padding:2px 0}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--s-done);margin-right:4px}
 .dot.off{background:var(--danger)}
+#printSheet{display:none}
+@media print{
+  body>*:not(#printSheet){display:none!important}
+  body{background:#fff;color:#000}
+  #printSheet{display:block;font:13pt/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;color:#000}
+  #printSheet h1{font-size:18pt;margin:0 0 2pt}
+  #printSheet .sub{font-size:10pt;margin:0 0 10pt}
+  #printSheet table{width:100%;border-collapse:collapse}
+  #printSheet th,#printSheet td{border:1px solid #000;padding:5pt 6pt;text-align:left;vertical-align:top}
+  #printSheet th{font-size:10pt;background:#e8e8e8}
+  #printSheet td.c{font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+  #printSheet td.tick{width:28pt}
+  #printSheet tr{break-inside:avoid}
+  @page{size:A4 landscape;margin:12mm}
+}
 @media (max-width:760px){
   aside{position:fixed;z-index:15;top:52px;bottom:0;left:0;width:88vw;box-shadow:4px 0 20px rgba(0,0,0,.2)}
   .grid{grid-template-columns:1fr}
@@ -250,6 +265,7 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
 <datalist id="dl_client"></datalist><datalist id="dl_project"></datalist><datalist id="dl_transporter"></datalist>
 <datalist id="dl_cargoType"></datalist><datalist id="dl_truckPlate"></datalist>
 <div class="toast" id="toast" role="status"></div>
+<div id="printSheet"></div>
 
 <script src="vendor/supabase-2.117.2.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <script>
@@ -322,6 +338,13 @@ const DJ = (() => {
     return (stem || "file") + ext;
   }
   function fmtSize(n) { n = +n || 0; return n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
+
+  // Day sheet for the depot: the day's jobs that aren't done, by time, only what the crew needs (never prices).
+  function daySheetRows(jobs, day) {
+    return jobs.filter(j => j.date === day && j.status !== "done")
+      .sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : (a.time || "99") > (b.time || "99") ? 1 : 0)
+      .map(j => ({ time: j.time || "", client: j.client || "", shippingContainer: j.shippingContainer || "", hctContainer: j.hctContainer || "", cargoType: j.cargoType || "", truckPlate: j.truckPlate || "" }));
+  }
 
   function newId() {
     try { return crypto.randomUUID(); } catch (e) { return "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -478,7 +501,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows };
 })();
 
 /* ================= Supabase ================= */
@@ -771,7 +794,7 @@ function renderBoard() {
   const q = $("#search").value, d = ui.boardDate;
   const list = jobs.filter(j => j.date === d && DJ.matches(j, q));
   $("#main").innerHTML =
-    '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button>' +
+    '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button><button id="bPrint" title="Printable list of the jobs to do this day, for the depot (no prices)">🖨 Day sheet</button>' +
     '<span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' · drag a card to change its status</span></div>' +
     '<div class="board">' + DJ.STATUSES.map(s => {
       const l = list.filter(j => j.status === s).sort(byDate);
@@ -782,6 +805,7 @@ function renderBoard() {
   $("#bPrev").onclick = () => setD(DJ.addDays(ui.boardDate, -1));
   $("#bNext").onclick = () => setD(DJ.addDays(ui.boardDate, 1));
   $("#bToday").onclick = () => setD(todayStr());
+  $("#bPrint").onclick = () => printDaySheet(d);
   wireDrag(".col", (job, el) => { const st = el.dataset.status; job.status = st; if (st === "done" && job.checklist.some(c => !c.done)) toast("Marked done — some checklist steps are still unticked"); });
 }
 
@@ -817,6 +841,16 @@ function wireDrag(sel, apply) {
       DB.patchJob(job).catch(err => { Object.assign(job, before); render(); fail("Move not saved", err); });
     });
   });
+}
+
+function printDaySheet(day) {
+  const rows = DJ.daySheetRows(jobs, day);
+  const long = DJ.parseYmd(day).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  $("#printSheet").innerHTML = '<h1>Depot jobs · ' + esc(long) + '</h1><p class="sub">' + rows.length + ' job' + (rows.length === 1 ? '' : 's') + ' to do · printed ' + esc(new Date().toLocaleString()) + '</p>' +
+    (rows.length ? '<table><thead><tr><th>Time</th><th>Client</th><th>Shipping container</th><th>HCT container</th><th>Cargo type</th><th>Truck plate</th><th>✓</th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td>' + esc(r.time) + '</td><td>' + esc(r.client) + '</td><td class="c">' + esc(r.shippingContainer) + '</td><td class="c">' + esc(r.hctContainer) + '</td><td>' + esc(r.cargoType) + '</td><td class="c">' + esc(r.truckPlate) + '</td><td class="tick"></td></tr>').join("") + '</tbody></table>'
+      : '<p>No jobs to do on this day.</p>');
+  window.print();
 }
 
 function render() {
@@ -1097,6 +1131,8 @@ function selfTest() {
   ok("file type by extension", DJ.fileType("Invoice.PDF") === "application/pdf" && DJ.fileType("mail.msg") === "application/vnd.ms-outlook" && DJ.fileType("x.exe") === "" && DJ.fileType("noext") === "");
   ok("file checks", DJ.fileProblem({ name: "a.pdf", size: 10 }) === "" && DJ.fileProblem({ name: "a.html", size: 10 }) !== "" && DJ.fileProblem({ name: "a.pdf", size: DJ.FILE_MAX + 1 }) !== "" && DJ.fileProblem({ name: "a.pdf", size: 0 }) !== "");
   ok("storage name is plain ASCII", DJ.storageName("Τιμολόγιο Μάιος 2026.PDF") === "2026.pdf" && DJ.storageName("C:\\x\\my file (1).xlsx") === "my_file_1.xlsx" && DJ.storageName("ΑΒΓ") === "file" && /^[A-Za-z0-9_.-]+$/.test(DJ.storageName("../../etc/passwd")));
+  const sheet = DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", time: "14:00", client: "B", price: "99" }), DJ.cleanJob({ date: "2026-10-21", time: "09:00", client: "A", status: "scheduled" }), DJ.cleanJob({ date: "2026-10-21", client: "C", status: "done" }), DJ.cleanJob({ date: "2026-10-22", client: "D" })], "2026-10-21");
+  ok("day sheet: that day, not done, by time, no price", sheet.map(r => r.client).join() === "A,B" && !("price" in sheet[0]));
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
   return { total, failed };
 }

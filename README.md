@@ -45,7 +45,7 @@ recorded in `job_history` by a trigger, so the editor can show who changed what.
   `ok = true` (21 + 8 attachment checks, two result tables; nothing is left behind).
 - **UI with two users:** `tests/ui/run.mjs` drives the page in Chromium with a stand-in for
   Supabase (`tests/ui/fake-supabase.js`): login, live updates between two users, edit conflicts,
-  day notes, drag & drop, attachments (pick, drop on a card, open, download, remove, queued on a
+  day notes, drag & drop, printable day sheet (no prices), attachments (pick, drop on a card, open, download, remove, queued on a
   new job, removed with the job, hidden from depot), approving a user, hiding prices, Excel export,
   delete, sign out.
   ```

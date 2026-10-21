@@ -131,6 +131,13 @@ await M.reload(); await M.fill('#lg_email', 'maria@test'); await M.fill('#lg_pw'
 log('depot sees attachments:', await M.isVisible('#drop'), '| clip on card:', (await M.textContent('#sideList')).includes('📎'));
 const txt = await M.evaluate(() => document.body.innerText); log('depot price field hidden:', await M.isHidden('#f_price'), '| price value:', JSON.stringify(await M.inputValue('#f_price')), '| price on screen:', txt.includes('350'));
 await M.click('#jobForm [data-close]');
+// day sheet for the depot: print layout shows only the sheet, no prices
+await G.click('nav [data-view=board]'); await G.evaluate(() => { window.print = () => { window.__printed = true; }; });
+await G.fill('#bDate', db.jobs[0].job_date); await G.dispatchEvent('#bDate', 'change'); await G.click('#bPrint');
+await G.emulateMedia({ media: 'print' });
+const sheetTxt = await G.evaluate(() => document.body.innerText);
+log('day sheet printed:', await G.evaluate(() => window.__printed), '| has container:', sheetTxt.includes('CSQU3054383'), '| price shown:', sheetTxt.includes('350'), '| app hidden:', !sheetTxt.includes('New job'));
+await G.screenshot({ path: new URL('./g-daysheet.png', import.meta.url).pathname }); await G.emulateMedia({ media: 'screen' });
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });
