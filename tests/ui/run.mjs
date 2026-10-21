@@ -138,6 +138,7 @@ await G.emulateMedia({ media: 'print' });
 const sheetTxt = await G.evaluate(() => document.body.innerText);
 log('day sheet printed:', await G.evaluate(() => window.__printed), '| has container:', sheetTxt.includes('CSQU3054383'), '| price shown:', sheetTxt.includes('350'), '| app hidden:', !sheetTxt.includes('New job'));
 await G.screenshot({ path: new URL('./g-daysheet.png', import.meta.url).pathname }); await G.emulateMedia({ media: 'screen' });
+const [dsx] = await Promise.all([G.waitForEvent('download'), G.click('#bSheetX')]); await dsx.saveAs(new URL('./daysheet.xlsx', import.meta.url).pathname); log('day sheet excel:', dsx.suggestedFilename());
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });

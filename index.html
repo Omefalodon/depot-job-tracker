@@ -794,7 +794,7 @@ function renderBoard() {
   const q = $("#search").value, d = ui.boardDate;
   const list = jobs.filter(j => j.date === d && DJ.matches(j, q));
   $("#main").innerHTML =
-    '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button><button id="bPrint" title="Printable list of the jobs to do this day, for the depot (no prices)">🖨 Day sheet</button>' +
+    '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button><button id="bPrint" title="Printable list of the jobs to do this day, for the depot (no prices)">🖨 Day sheet</button><button id="bSheetX" title="The same day sheet as an Excel file you can edit">Day sheet (Excel)</button>' +
     '<span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' · drag a card to change its status</span></div>' +
     '<div class="board">' + DJ.STATUSES.map(s => {
       const l = list.filter(j => j.status === s).sort(byDate);
@@ -806,6 +806,7 @@ function renderBoard() {
   $("#bNext").onclick = () => setD(DJ.addDays(ui.boardDate, 1));
   $("#bToday").onclick = () => setD(todayStr());
   $("#bPrint").onclick = () => printDaySheet(d);
+  $("#bSheetX").onclick = () => daySheetExcel(d);
   wireDrag(".col", (job, el) => { const st = el.dataset.status; job.status = st; if (st === "done" && job.checklist.some(c => !c.done)) toast("Marked done — some checklist steps are still unticked"); });
 }
 
@@ -843,6 +844,13 @@ function wireDrag(sel, apply) {
   });
 }
 
+const SHEET_HEAD = ["Time", "Client", "Shipping container", "HCT container", "Cargo type", "Truck plate", "Done"];
+function daySheetExcel(day) {
+  const rows = DJ.daySheetRows(jobs, day);
+  if (!rows.length) { toast("No jobs to do on this day"); return; }
+  const bytes = DJ.xlsx([SHEET_HEAD].concat(rows.map(r => [r.time, r.client, r.shippingContainer, r.hctContainer, r.cargoType, r.truckPlate, ""])), "Depot " + day);
+  download("Depot jobs " + day + ".xlsx", new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+}
 function printDaySheet(day) {
   const rows = DJ.daySheetRows(jobs, day);
   const long = DJ.parseYmd(day).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
