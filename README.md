@@ -17,12 +17,25 @@ on, the database returns nothing (see `tests/rls-tests.sql`). No passwords, secr
 data are in this repo. **Never commit the `service_role` / secret key.**
 
 ## Roles
-| Role | Jobs, notes | Prices, attachments | Users screen |
+| Role | Jobs, notes | Prices, invoice numbers, attachments | Users screen |
 |---|---|---|---|
 | admin | read / write | read / write | yes |
 | office | read / write | read / write | no |
 | depot (future) | read / write | **hidden** | no |
 | not approved yet | nothing | nothing | no |
+
+## Invoicing
+`job_invoices` holds one invoice number per job (many jobs can share one), with the date it was
+set. The **Invoicing** view lists jobs with filters (status, invoiced or not, client, project,
+transporter, cargo, dates, invoice number); click rows to select (Shift+click for a range), type a
+number and press *Set on selected*. Office + admin only, like prices; every change is in the job's
+history.
+
+## Bulk import from Excel
+All jobs › *Excel template* downloads an .xlsx with every job column (row 3) and an optional
+project cell at the top (B1, used for rows with no project). *Import from Excel* reads the filled
+file in the browser, shows a preview with warnings (dates, numbers, check digits, possible
+duplicates) and creates the jobs only after *Create N jobs*. Up to 1000 rows per file.
 
 ## Attachments
 Files dropped on a job (or on its card) go to the **private** Storage bucket `job-files`, under
@@ -42,10 +55,11 @@ recorded in `job_history` by a trigger, so the editor can show who changed what.
 ## Tests
 - **Self-test in the page:** ⋯ › Run self-test (logic: container check digit, dates, Excel writer…).
 - **Database rules:** paste `tests/rls-tests.sql` into the Supabase SQL editor; every row must say
-  `ok = true` (21 + 8 attachment checks, two result tables; nothing is left behind).
+  `ok = true` (21 + 8 attachment + 9 invoice checks, three result tables; nothing is left behind).
 - **UI with two users:** `tests/ui/run.mjs` drives the page in Chromium with a stand-in for
   Supabase (`tests/ui/fake-supabase.js`): login, live updates between two users, edit conflicts,
-  day notes, drag & drop, printable day sheet (no prices), attachments (pick, drop on a card, open, download, remove, queued on a
+  day notes, drag & drop, printable day sheet (no prices), Excel template filled by openpyxl
+  and imported, Invoicing (select range, set/remove invoice no, filters), attachments (pick, drop on a card, open, download, remove, queued on a
   new job, removed with the job, hidden from depot), approving a user, hiding prices, Excel export,
   delete, sign out.
   ```

@@ -2,3 +2,4 @@ node_modules/
 tests/ui/out.xlsx
 tests/ui/*.png
 tests/ui/daysheet.xlsx
+tests/ui/tpl*.xlsx

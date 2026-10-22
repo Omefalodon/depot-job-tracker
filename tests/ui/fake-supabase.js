@@ -4,10 +4,11 @@ var supabase = { createClient() {
   const fire = (ev) => authCbs.forEach(cb => cb(ev, session));
   window.__rt = () => rtHandlers.forEach(h => h({}));
   function from(table) {
-    const st = { table, op: "select", filters: [], row: null, ret: false, single: false };
+    const st = { table, op: "select", filters: [], ins: [], row: null, ret: false, single: false };
     const b = {
       select() { st.ret = true; return b; }, order() { return b; }, limit() { return b; },
       eq(k, v) { st.filters.push([k, v]); return b; },
+      in(k, arr) { st.ins.push([k, arr]); return b; }, range() { return b; },
       insert(row) { st.op = "insert"; st.row = row; return b; },
       update(row) { st.op = "update"; st.row = row; return b; },
       upsert(row) { st.op = "upsert"; st.row = row; return b; },

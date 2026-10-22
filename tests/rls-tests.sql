@@ -130,3 +130,46 @@ begin
   for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_results(test, ok) values (r[i], b[i]); end loop;
 end $$;
 select test, ok from t_results order by n;
+
+-- ===== Invoices (job_invoices), added 2026-10-22. Run on its own; read the result table. =====
+create temp table if not exists t_inv (n serial, test text, ok boolean);
+do $$
+declare c int; j1 uuid; j2 uuid; err text; r text[] := array[]::text[]; b boolean[] := array[]::boolean[];
+begin
+  begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000b2","role":"authenticated"}', true);
+  insert into public.jobs (client) values ('inv 1') returning id into j1;
+  insert into public.jobs (client) values ('inv 2') returning id into j2;
+  insert into public.job_invoices (job_id, invoice_no) values (j1, 'INV-100'), (j2, 'INV-100');
+  select count(*) into c from public.job_invoices where invoice_no = 'INV-100' and updated_by = '00000000-0000-4000-8000-0000000000b2';
+  r := array_append(r, 'office: one invoice no on two jobs'); b := array_append(b, c = 2);
+  insert into public.job_invoices (job_id, invoice_no) values (j1, 'INV-101') on conflict (job_id) do update set invoice_no = excluded.invoice_no;
+  select count(*) into c from public.job_invoices where job_id = j1 and invoice_no = 'INV-101';
+  r := array_append(r, 'office: change invoice no (upsert)'); b := array_append(b, c = 1);
+  begin insert into public.job_invoices (job_id, invoice_no) values (j2, '  ') on conflict (job_id) do update set invoice_no = excluded.invoice_no; err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'blank invoice no refused'); b := array_append(b, err = 'blocked');
+  select count(*) into c from public.job_history where job_id = j1 and action like 'invoice-%';
+  r := array_append(r, 'invoice changes logged'); b := array_append(b, c = 2);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c3","role":"authenticated"}', true);
+  select count(*) into c from public.job_invoices;
+  r := array_append(r, 'depot: sees no invoices'); b := array_append(b, c = 0);
+  select count(*) into c from public.job_history where job_id = j1 and action like 'invoice-%';
+  r := array_append(r, 'depot: no invoice history'); b := array_append(b, c = 0);
+  begin insert into public.job_invoices (job_id, invoice_no) values (j2, 'X') on conflict (job_id) do update set invoice_no = excluded.invoice_no; err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'depot: cannot set invoice'); b := array_append(b, err = 'blocked');
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000d4","role":"authenticated"}', true);
+  select count(*) into c from public.job_invoices;
+  r := array_append(r, 'pending: sees no invoices'); b := array_append(b, c = 0);
+  perform set_config('role', 'anon', true);
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  begin select count(*) into c from public.job_invoices; err := 'allowed ' || c; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'anon: cannot read invoices (' || err || ')'); b := array_append(b, err = 'blocked' or err = 'allowed 0');
+  raise exception 'rollback';
+  exception when others then
+    perform set_config('role', 'postgres', true);
+    if sqlerrm <> 'rollback' then r := array_append(r, 'SUITE CRASHED: ' || sqlerrm); b := array_append(b, false); end if;
+  end;
+  for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_inv(test, ok) values (r[i], b[i]); end loop;
+end $$;
+select test, ok from t_inv order by n;

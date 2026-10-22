@@ -137,6 +137,20 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
 .hist div{padding:2px 0}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--s-done);margin-right:4px}
 .dot.off{background:var(--danger)}
+.filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:-4px 0 12px}
+.filters select,.filters input{width:auto;max-width:190px;padding:4px 6px;font-size:13px}
+.filters label.inl{display:flex;gap:4px;align-items:center;margin:0;font-size:12px}
+.filters .on{border-color:var(--accent);background:var(--accent-weak)}
+.invbar{position:sticky;top:-14px;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.invbar input{width:180px}
+.invbar .n{font-weight:600}
+tr.irow{cursor:pointer} tr.irow:hover td{background:var(--surface2)} tr.irow.sel td{background:var(--accent-weak)}
+td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;margin:0}
+.inv-yes{font-weight:600} .inv-no{color:var(--muted)}
+.foot{color:var(--muted);font-size:12px;margin-top:8px}
+#impDlg{width:min(1100px,96vw)}
+#impBody table td,#impBody table th{font-size:12px;padding:4px 6px;cursor:default}
+#impBody .w{color:var(--warn)}
 #printSheet{display:none}
 @media print{
   body>*:not(#printSheet){display:none!important}
@@ -169,6 +183,7 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
     <button data-view="week">Week</button>
     <button data-view="board">Today</button>
     <button data-view="projects">Projects</button>
+    <button data-view="invoicing" class="price-only" hidden>Invoicing</button>
     <button data-view="users" id="navUsers" hidden>Users</button>
   </nav>
   <div class="spacer"></div>
@@ -177,6 +192,9 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
   <div class="menu">
     <button id="btnMenu" aria-label="More">⋯</button>
     <div class="menu-list" id="menuList">
+      <button data-act="template">Download Excel template for new jobs</button>
+      <button data-act="import">Import jobs from Excel…</button>
+      <hr>
       <button data-act="backup">Save a copy of all jobs (.json)</button>
       <button data-act="restore" class="admin-only" hidden>Import jobs from a demo backup…</button>
       <hr>
@@ -189,6 +207,7 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
     </div>
   </div>
   <input type="file" id="fileRestore" accept=".json,application/json" hidden>
+  <input type="file" id="fileImport" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
 </header>
 <div id="banner" class="banner" hidden></div>
 <div id="gate">
@@ -231,6 +250,7 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
         <div><label for="f_cargoType">Cargo type</label><input id="f_cargoType" name="cargoType" list="dl_cargoType" maxlength="120"></div>
         <div><label for="f_weight">Weight (kg)</label><input id="f_weight" name="weight" type="number" min="0" step="1" inputmode="numeric"></div>
         <div><label for="f_pieces">Pieces</label><input id="f_pieces" name="pieces" type="number" min="0" step="1" inputmode="numeric"></div>
+        <div class="price-only"><label for="f_invoiceNo">Invoice no</label><input id="f_invoiceNo" maxlength="60"></div>
         <div class="price-only"><label for="f_price">Price (€)</label><input id="f_price" name="price" type="number" min="0" step="0.01" inputmode="decimal"></div>
         <div><label for="f_date">Date</label><input id="f_date" name="date" type="date"></div>
         <div><label for="f_time">Time</label><input id="f_time" name="time" type="time" step="900"></div>
@@ -264,6 +284,11 @@ mark{background:#ffe58f;color:#000;border-radius:2px}
 </dialog>
 <datalist id="dl_client"></datalist><datalist id="dl_project"></datalist><datalist id="dl_transporter"></datalist>
 <datalist id="dl_cargoType"></datalist><datalist id="dl_truckPlate"></datalist>
+<dialog id="impDlg">
+  <div class="dlg-head"><h2>Import jobs from Excel</h2><button type="button" class="ghost" data-iclose aria-label="Close">✕</button></div>
+  <div class="dlg-body" id="impBody"></div>
+  <div class="dlg-foot"><button type="button" class="primary" id="impGo">Create jobs</button><button type="button" data-iclose>Cancel</button></div>
+</dialog>
 <div class="toast" id="toast" role="status"></div>
 <div id="printSheet"></div>
 
@@ -307,7 +332,7 @@ const DJ = (() => {
   function matches(job, q) {
     q = String(q || "").trim().toLowerCase();
     if (!q) return true;
-    const hay = FIELDS.map(([k]) => job[k] == null ? "" : String(job[k])).join(" ").toLowerCase() + " " +
+    const hay = FIELDS.map(([k]) => job[k] == null ? "" : String(job[k])).join(" ").toLowerCase() + " " + String(job.invoiceNo || "").toLowerCase() + " " +
       (job.checklist || []).map(c => c.text).join(" ").toLowerCase();
     return q.split(/\s+/).every(w => hay.includes(w));
   }
@@ -346,6 +371,160 @@ const DJ = (() => {
       .map(j => ({ time: j.time || "", client: j.client || "", shippingContainer: j.shippingContainer || "", hctContainer: j.hctContainer || "", cargoType: j.cargoType || "", truckPlate: j.truckPlate || "" }));
   }
 
+  // ---------- filters and sorting (All jobs, Invoicing) ----------
+  const NONE = "∅"; // filter value meaning "empty"
+  function applyFilters(list, f) {
+    f = f || {};
+    const is = (v, want) => !want || (want === NONE ? !v : v === want);
+    return list.filter(j =>
+      (!f.status || f.status === "all" || (f.status === "active" ? j.status !== "done" : j.status === f.status)) &&
+      is(j.client, f.client) && is(j.project, f.project) && is(j.transporter, f.transporter) && is(j.cargoType, f.cargoType) &&
+      (!f.from || (j.date && j.date >= f.from)) && (!f.to || (j.date && j.date <= f.to)) &&
+      (!f.invoiced || f.invoiced === "all" || (f.invoiced === "no" ? !j.invoiceNo : !!j.invoiceNo)) &&
+      (!f.invoiceNo || String(j.invoiceNo || "").toLowerCase().includes(String(f.invoiceNo).trim().toLowerCase())));
+  }
+  function sortJobs(list, k, dir) {
+    const byDt = (a, b) => { const x = (a.date || "9999") + (a.time || "99"), y = (b.date || "9999") + (b.time || "99"); return x < y ? -1 : x > y ? 1 : 0; };
+    return list.slice().sort((a, b) => {
+      let x = a[k] || "", y = b[k] || "";
+      if (k === "date") return byDt(a, b) * dir; // undated jobs last
+      if (k === "weight" || k === "pieces" || k === "price") { x = +x || 0; y = +y || 0; }
+      if (k === "status") { x = STATUSES.indexOf(a.status); y = STATUSES.indexOf(b.status); }
+      if (typeof x === "string") { const c = x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" }); if (c) return c * dir; }
+      else if (x !== y) return (x < y ? -1 : 1) * dir;
+      return byDt(a, b);
+    });
+  }
+
+  // ---------- bulk import from Excel ----------
+  function normHead(s) { return String(s == null ? "" : s).toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9Ͱ-Ͽ]+/g, " ").trim(); }
+  const HEAD_KEYS = { status: "status", "invoice no": "invoiceNo", "invoice number": "invoiceNo", invoice: "invoiceNo", notes: "notes", description: "notes", weight: "weight", price: "price", plate: "truckPlate", "container": "shippingContainer" };
+  for (const [k, l] of FIELDS) HEAD_KEYS[normHead(l)] = k;
+  function templateHead(withPrices) { return FIELDS.filter(([k]) => withPrices || k !== "price").map(f => f[1]).concat(["Status"]).concat(withPrices ? ["Invoice no"] : []); }
+  function templateRows(withPrices) {
+    return [["Project (optional, used for every row with an empty Project):", ""],
+      ["One job per row, starting under the headings. Dates like 22/10/2026, times like 09:30. Leave columns you don't need empty."],
+      templateHead(withPrices)];
+  }
+  function excelDate(v) {
+    if (v === "" || v == null) return { v: "" };
+    if (typeof v === "number") {
+      if (v < 1 || v > 2958465) return { v: "", bad: true };
+      return { v: new Date(Math.round((Math.floor(v) - 25569) * 86400000)).toISOString().slice(0, 10) };
+    }
+    const s = String(v).trim(); let m;
+    const mk = (y, mo, d) => { const dt = new Date(Date.UTC(y, mo - 1, d)); return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d ? { v: dt.toISOString().slice(0, 10) } : { v: "", bad: true }; };
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s))) return mk(+m[1], +m[2], +m[3]);
+    if ((m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})$/.exec(s))) return mk(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
+    return { v: "", bad: true };
+  }
+  function excelTime(v) {
+    if (v === "" || v == null) return { v: "" };
+    const hm = (h, mi) => h >= 0 && h < 24 && mi >= 0 && mi < 60 ? { v: String(h).padStart(2, "0") + ":" + String(mi).padStart(2, "0") } : { v: "", bad: true };
+    if (typeof v === "number") {
+      if (Number.isInteger(v) && v >= 0 && v < 24) return hm(v, 0);
+      const mins = Math.round((v - Math.floor(v)) * 1440) % 1440; return hm(Math.floor(mins / 60), mins % 60);
+    }
+    const m = /^(\d{1,2})(?:[:.](\d{2}))?$/.exec(String(v).trim());
+    return m ? hm(+m[1], +(m[2] || 0)) : { v: "", bad: true };
+  }
+  function excelNum(v) {
+    if (v === "" || v == null) return { v: "" };
+    if (typeof v === "number") return v >= 0 ? { v: String(v) } : { v: "", bad: true };
+    let s = String(v).replace(/[\s€]/g, "").replace(/kg$/i, "");
+    if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(",", ".");
+    return /^\d+(\.\d+)?$/.test(s) ? { v: s } : { v: "", bad: true };
+  }
+  const LABEL = {}; for (const [k, l] of FIELDS) LABEL[k] = l;
+  function parseImport(grid, existing) {
+    const out = { project: "", jobs: [], problems: [] };
+    let hr = -1, map = {};
+    for (let r = 0; r < Math.min(grid.length, 15) && hr < 0; r++) {
+      const m = {}, used = new Set();
+      (grid[r] || []).forEach((c, i) => { const k = HEAD_KEYS[normHead(c)]; if (k && !used.has(k)) { m[i] = k; used.add(k); } });
+      if (used.size >= 3) { hr = r; map = m; }
+    }
+    if (hr < 0) { out.problems.push("Couldn't find the row with the headings (Client, Shipping container, …). Start from the template."); return out; }
+    for (let r = 0; r < hr; r++) {
+      const row = grid[r] || [], i = row.findIndex(c => /^\s*project/i.test(String(c == null ? "" : c)));
+      if (i >= 0) { const v = row.slice(i + 1).find(c => String(c == null ? "" : c).trim() !== ""); if (v != null) out.project = String(v).trim().slice(0, 120); }
+    }
+    const seen = new Set((existing || []).filter(j => j.shippingContainer && j.date).map(j => j.shippingContainer + "|" + j.date));
+    for (let r = hr + 1; r < grid.length; r++) {
+      const row = grid[r] || [], raw = {};
+      for (const i in map) raw[map[i]] = row[i] == null ? "" : row[i];
+      if (!Object.values(raw).some(v => String(v).trim() !== "")) continue;
+      if (out.jobs.length >= 1000) { out.problems.push("Only the first 1000 jobs are read; split the file."); break; }
+      const warn = [], j = {};
+      for (const [k] of FIELDS) j[k] = raw[k] == null ? "" : String(raw[k]).trim();
+      const d = excelDate(raw.date); if (d.bad) warn.push("date “" + raw.date + "” not understood, left empty"); j.date = d.v;
+      const t = excelTime(raw.time); if (t.bad) warn.push("time “" + raw.time + "” not understood, left empty"); j.time = t.v;
+      for (const k of ["weight", "pieces", "price"]) { const n = excelNum(raw[k]); if (n.bad) warn.push(LABEL[k] + " “" + raw[k] + "” is not a number, left empty"); j[k] = n.v; }
+      if (!j.project) j.project = out.project;
+      const st = String(raw.status == null ? "" : raw.status).trim().toLowerCase().replace(/[\s_]+/g, "-");
+      const sk = STATUSES.find(x => x === st || STATUS_LABEL[x].toLowerCase().replace(/\s+/g, "-") === st);
+      if (st && !sk) warn.push("status “" + raw.status + "” not understood");
+      j.status = sk || (j.date ? "scheduled" : "open");
+      j.invoiceNo = raw.invoiceNo == null ? "" : String(raw.invoiceNo).trim();
+      if (j.invoiceNo) j.invoicedOn = new Date().toISOString().slice(0, 10);
+      const c = cleanJob(j);
+      for (const k of ["shippingContainer", "hctContainer"]) { const w = containerWarning(c[k]); if (w) warn.push(LABEL[k] + ": " + w); }
+      const key = c.shippingContainer + "|" + c.date;
+      if (c.shippingContainer && c.date && seen.has(key)) warn.push("possible duplicate: this container is already on that date");
+      if (c.shippingContainer && c.date) seen.add(key);
+      out.jobs.push({ row: r + 1, job: c, warnings: warn });
+    }
+    if (!out.jobs.length && !out.problems.length) out.problems.push("No jobs found under the headings.");
+    return out;
+  }
+  // Minimal .xlsx reader: first sheet as rows of cell values (numbers stay numbers). Needs DecompressionStream.
+  function colIndex(letters) { let n = 0; for (const ch of letters.toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; }
+  async function readXlsx(buf) {
+    const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), files = {};
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error("this is not an .xlsx file (old .xls? save it as .xlsx first)");
+    let p = dv.getUint32(eocd + 16, true);
+    for (let k = 0, n = dv.getUint16(eocd + 10, true); k < n; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("the file looks damaged");
+      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nlen = dv.getUint16(p + 28, true), off = dv.getUint32(p + 42, true);
+      const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nlen)), start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+      files[name] = { method, data: u8.subarray(start, start + csize) };
+      p += 46 + nlen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    }
+    const text = async name => {
+      const f = files[name]; if (!f) return "";
+      if (f.method === 0) return new TextDecoder().decode(f.data);
+      if (f.method !== 8 || typeof DecompressionStream === "undefined") throw new Error("this browser can't read the file; use Edge or Chrome");
+      return new TextDecoder().decode(await new Response(new Blob([f.data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+    };
+    const xml = s => new DOMParser().parseFromString(s, "application/xml");
+    let sheet = "xl/worksheets/sheet1.xml";
+    const first = xml(await text("xl/workbook.xml")).getElementsByTagName("sheet")[0];
+    if (first) {
+      const rid = first.getAttribute("r:id");
+      for (const rel of xml(await text("xl/_rels/workbook.xml.rels")).getElementsByTagName("Relationship"))
+        if (rel.getAttribute("Id") === rid) { const t = rel.getAttribute("Target"); sheet = t.startsWith("/") ? t.slice(1) : "xl/" + t.replace(/^\.\//, ""); }
+    }
+    const shared = [];
+    if (files["xl/sharedStrings.xml"]) for (const si of xml(await text("xl/sharedStrings.xml")).getElementsByTagName("si"))
+      shared.push(Array.from(si.getElementsByTagName("t")).filter(t => t.parentNode.nodeName !== "rPh").map(t => t.textContent).join(""));
+    const grid = []; let ri = -1;
+    for (const row of xml(await text(sheet)).getElementsByTagName("row")) {
+      ri = row.getAttribute("r") ? +row.getAttribute("r") - 1 : ri + 1;
+      const cells = []; let ci = -1;
+      for (const c of row.getElementsByTagName("c")) {
+        const ref = c.getAttribute("r"); ci = ref ? colIndex(ref.replace(/\d+/g, "")) : ci + 1;
+        const t = c.getAttribute("t"), v = c.getElementsByTagName("v")[0], vt = v ? v.textContent : "";
+        cells[ci] = t === "s" ? (shared[+vt] == null ? "" : shared[+vt]) : t === "inlineStr" ? Array.from(c.getElementsByTagName("t")).map(x => x.textContent).join("")
+          : t === "str" ? vt : t === "e" ? "" : t === "b" ? (vt === "1" ? "TRUE" : "FALSE") : vt === "" ? "" : +vt;
+      }
+      grid[ri] = cells;
+    }
+    return grid;
+  }
+
   function newId() {
     try { return crypto.randomUUID(); } catch (e) { return "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   }
@@ -361,6 +540,8 @@ const DJ = (() => {
     if (out.date && !/^\d{4}-\d{2}-\d{2}$/.test(out.date)) out.date = "";
     out.time = /^([01]\d|2[0-3]):[0-5]\d/.test(out.time) ? out.time.slice(0, 5) : "";
     out.status = STATUSES.includes(j.status) ? j.status : "open";
+    out.invoiceNo = String(j.invoiceNo == null ? "" : j.invoiceNo).trim().slice(0, 60);
+    out.invoicedOn = /^\d{4}-\d{2}-\d{2}$/.test(j.invoicedOn || "") ? j.invoicedOn : "";
     out.checklist = Array.isArray(j.checklist) ? j.checklist.filter(c => c && String(c.text || "").trim())
       .map(c => ({ text: String(c.text).slice(0, 300), done: !!c.done })) : [];
     out.created = j.created || "";
@@ -404,14 +585,21 @@ const DJ = (() => {
   function xmlEsc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ""); }
   function colName(i) { let s = ""; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
   // rows: array of arrays; numbers become numeric cells, everything else text. Row 0 = header (bold).
-  function xlsx(rows, sheetName) {
+  // opts: bold (row indexes), freeze (rows kept on top), filterRow (header row for the filter, null = none),
+  // widthFrom (first row used to size columns), lists [{col, from, to, values}] (drop-down cells)
+  function xlsx(rows, sheetName, opts) {
+    opts = Object.assign({ bold: [0], freeze: 1, filterRow: 0, widthFrom: 0, lists: [] }, opts || {});
     const enc = new TextEncoder();
     const sd = rows.map((r, ri) => '<row r="' + (ri + 1) + '">' + r.map((v, ci) => {
-      const ref = colName(ci) + (ri + 1), st = ri === 0 ? ' s="1"' : "";
+      const ref = colName(ci) + (ri + 1), st = opts.bold.includes(ri) ? ' s="1"' : "";
       if (typeof v === "number" && isFinite(v)) return '<c r="' + ref + '"' + st + '><v>' + v + '</v></c>';
       return '<c r="' + ref + '"' + st + ' t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(v == null ? "" : v) + '</t></is></c>';
     }).join("") + '</row>').join("");
-    const widths = rows[0] ? rows[0].map((_, ci) => Math.min(60, Math.max(10, ...rows.map(r => String(r[ci] == null ? "" : r[ci]).length + 2)))) : [];
+    const sized = rows.slice(opts.widthFrom), ncol = Math.max(0, ...rows.map(r => r.length));
+    const widths = rows.length ? Array.from({ length: ncol }, (_, ci) => Math.min(60, Math.max(10, ...sized.map(r => String(r[ci] == null ? "" : r[ci]).length + 2)))) : [];
+    const pane = opts.freeze ? '<pane ySplit="' + opts.freeze + '" topLeftCell="A' + (opts.freeze + 1) + '" activePane="bottomLeft" state="frozen"/>' : "";
+    const filter = opts.filterRow != null && rows.length > opts.filterRow + 1 ? '<autoFilter ref="A' + (opts.filterRow + 1) + ':' + colName(rows[opts.filterRow].length - 1) + rows.length + '"/>' : "";
+    const lists = opts.lists.length ? '<dataValidations count="' + opts.lists.length + '">' + opts.lists.map(l => '<dataValidation type="list" allowBlank="1" sqref="' + colName(l.col) + l.from + ':' + colName(l.col) + l.to + '"><formula1>"' + xmlEsc(l.values.join(",")) + '"</formula1></dataValidation>').join("") + '</dataValidations>' : "";
     const cols = widths.length ? "<cols>" + widths.map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join("") + "</cols>" : "";
     const name = xmlEsc(String(sheetName || "Jobs").replace(/[\\\/\?\*\[\]:]/g, " ").slice(0, 31) || "Jobs");
     const files = {
@@ -420,14 +608,14 @@ const DJ = (() => {
       "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' + name + '" sheetId="1" r:id="rId1"/></sheets></workbook>',
       "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
       "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
-      "xl/worksheets/sheet1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' + cols + '<sheetData>' + sd + '</sheetData>' + (rows.length > 1 ? '<autoFilter ref="A1:' + colName(rows[0].length - 1) + rows.length + '"/>' : '') + '</worksheet>'
+      "xl/worksheets/sheet1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0">' + pane + '</sheetView></sheetViews>' + cols + '<sheetData>' + sd + '</sheetData>' + filter + lists + '</worksheet>'
     };
     return zip(Object.keys(files).map(n => ({ name: n, data: enc.encode(files[n]) })));
   }
   function jobsToRows(jobs) {
-    const head = FIELDS.map(f => f[1]).concat(["Status", "Checklist"]);
+    const head = FIELDS.map(f => f[1]).concat(["Status", "Checklist", "Invoice no", "Invoiced on"]);
     const rows = jobs.map(j => FIELDS.map(([k]) => (k === "weight" || k === "pieces" || k === "price") && j[k] !== "" ? +j[k] : j[k])
-      .concat([STATUS_LABEL[j.status], (j.checklist || []).map(c => (c.done ? "[x] " : "[ ] ") + c.text).join("; ")]));
+      .concat([STATUS_LABEL[j.status], (j.checklist || []).map(c => (c.done ? "[x] " : "[ ] ") + c.text).join("; "), j.invoiceNo || "", j.invoicedOn || ""]));
     return [head].concat(rows);
   }
 
@@ -485,12 +673,13 @@ const DJ = (() => {
     r.status = c.status; r.checklist = c.checklist;
     return r;
   }
-  function fromRow(r, priceRow) {
+  function fromRow(r, priceRow, invRow) {
     const j = { id: r.id };
     for (const k in COLS) j[k] = r[COLS[k]] == null ? "" : r[COLS[k]];
     j.time = j.time ? String(j.time).slice(0, 5) : "";
     j.status = r.status; j.checklist = r.checklist;
     j.price = priceRow && priceRow.price != null ? priceRow.price : "";
+    j.invoiceNo = invRow ? invRow.invoice_no : ""; j.invoicedOn = invRow ? invRow.invoiced_on : "";
     j.created = r.created_at; j.updated = r.updated_at; j.createdBy = r.created_by; j.updatedBy = r.updated_by;
     return cleanJob(j);
   }
@@ -501,7 +690,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx };
 })();
 
 /* ================= Supabase ================= */
@@ -522,19 +711,31 @@ const isAdmin = () => me && me.role === "admin";
 function personName(id) { const p = people[id]; return p ? (p.full_name || p.email) : "someone"; }
 function fail(what, error) { console.error(what, error); toast(what + ": " + (error && error.message ? error.message : "no connection")); }
 
+// Supabase returns at most 1000 rows per request, so read big tables page by page.
+async function allRows(make) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const r = await make().range(from, from + 999);
+    if (r.error) return r;
+    out.push(...r.data);
+    if (r.data.length < 1000) return { data: out, error: null };
+  }
+}
 const DB = {
   async loadAll() {
-    const [j, pr, n, pp, fl] = await Promise.all([
-      sb.from("jobs").select("*").order("job_date", { ascending: true, nullsFirst: false }).limit(5000),
-      seesPrices() ? sb.from("job_prices").select("job_id,price") : Promise.resolve({ data: [] }),
+    const [j, pr, n, pp, fl, iv] = await Promise.all([
+      allRows(() => sb.from("jobs").select("*").order("id")),
+      seesPrices() ? allRows(() => sb.from("job_prices").select("job_id,price").order("job_id")) : Promise.resolve({ data: [] }),
       sb.from("day_notes").select("day,note"),
       sb.from("profiles").select("id,email,full_name,role,active"),
-      seesPrices() ? sb.from("job_files").select("id,job_id,path,name,size,mime,uploaded_at,uploaded_by").order("uploaded_at", { ascending: true }) : Promise.resolve({ data: [] })
+      seesPrices() ? allRows(() => sb.from("job_files").select("id,job_id,path,name,size,mime,uploaded_at,uploaded_by").order("uploaded_at", { ascending: true })) : Promise.resolve({ data: [] }),
+      seesPrices() ? allRows(() => sb.from("job_invoices").select("job_id,invoice_no,invoiced_on").order("job_id")) : Promise.resolve({ data: [] })
     ]);
-    const err = j.error || pr.error || n.error || pp.error || fl.error; if (err) throw err;
+    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error; if (err) throw err;
+    const invs = {}; for (const r of iv.data) invs[r.job_id] = r;
     files = {}; for (const f of fl.data) (files[f.job_id] = files[f.job_id] || []).push(f);
     const prices = {}; for (const r of pr.data) prices[r.job_id] = r;
-    jobs = j.data.map(r => DJ.fromRow(r, prices[r.id]));
+    jobs = DJ.sortJobs(j.data.map(r => DJ.fromRow(r, prices[r.id], invs[r.id])), "date", 1);
     const keep = {}; for (const d of dirtyNotes) keep[d] = dayNotes[d];
     dayNotes = {}; for (const r of n.data) dayNotes[r.day] = r.note;
     Object.assign(dayNotes, keep);
@@ -558,6 +759,12 @@ const DB = {
     }
     const saved = res.data[0];
     if (seesPrices()) {
+      const before = job.id ? jobs.find(x => x.id === job.id) : null, no = String(job.invoiceNo || "").trim();
+      if (no !== (before ? before.invoiceNo : "")) {
+        const iv = no ? await sb.from("job_invoices").upsert({ job_id: saved.id, invoice_no: no, invoiced_on: todayStr() })
+          : await sb.from("job_invoices").delete().eq("job_id", saved.id);
+        if (iv.error) throw iv.error;
+      }
       const pr = job.price === "" ? await sb.from("job_prices").delete().eq("job_id", saved.id)
         : await sb.from("job_prices").upsert({ job_id: saved.id, price: +job.price });
       if (pr.error) throw pr.error;
@@ -572,6 +779,26 @@ const DB = {
     const fs = files[id] || [];
     if (fs.length) { const s = await sb.storage.from("job-files").remove(fs.map(f => f.path)); if (s.error) throw s.error; }
     const r = await sb.from("jobs").delete().eq("id", id); if (r.error) throw r.error;
+  },
+  async setInvoice(list, no) {
+    const today = todayStr(), rows = list.map(j => ({ job_id: j.id, invoice_no: no, invoiced_on: j.invoiceNo === no && j.invoicedOn ? j.invoicedOn : today }));
+    for (let i = 0; i < rows.length; i += 200) { const r = await sb.from("job_invoices").upsert(rows.slice(i, i + 200)); if (r.error) throw r.error; }
+  },
+  async clearInvoice(ids) {
+    for (let i = 0; i < ids.length; i += 100) { const r = await sb.from("job_invoices").delete().in("job_id", ids.slice(i, i + 100)); if (r.error) throw r.error; }
+  },
+  async importJobs(list) { // list of cleaned jobs; ids made here so prices and invoices can follow
+    const withIds = list.map(j => Object.assign({}, j, { id: DJ.newId() }));
+    for (let i = 0; i < withIds.length; i += 200) {
+      const part = withIds.slice(i, i + 200);
+      const r = await sb.from("jobs").insert(part.map(j => Object.assign({ id: j.id }, DJ.toRow(j)))); if (r.error) throw r.error;
+      if (!seesPrices()) continue;
+      const pr = part.filter(j => j.price !== "").map(j => ({ job_id: j.id, price: +j.price }));
+      if (pr.length) { const x = await sb.from("job_prices").upsert(pr); if (x.error) throw x.error; }
+      const iv = part.filter(j => j.invoiceNo).map(j => ({ job_id: j.id, invoice_no: j.invoiceNo, invoiced_on: j.invoicedOn || todayStr() }));
+      if (iv.length) { const x = await sb.from("job_invoices").upsert(iv); if (x.error) throw x.error; }
+    }
+    return withIds.length;
   },
   async uploadFile(jobId, file) {
     const path = jobId + "/" + DJ.newId() + "-" + DJ.storageName(file.name), mime = DJ.fileType(file.name);
@@ -620,6 +847,7 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "job_prices" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "day_notes" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_files" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "job_invoices" }, reloadSoon)
     .subscribe(status => { if (status === "SUBSCRIBED") { setOnline(true); reloadSoon(); } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setOnline(false); });
 }
 
@@ -633,7 +861,9 @@ function flushNotes() {
 }
 function saveDayNotes() { clearTimeout(noteT); noteT = setTimeout(flushNotes, 600); }
 
-const ui = Object.assign({ wxPlace: "aspropyrgos", view: "board", panel: true, sort: "date", sortDir: 1, statusFilter: "active", project: "", weekStart: "", boardDate: "", theme: "" }, loadUi());
+const ui = Object.assign({ wxPlace: "aspropyrgos", view: "board", panel: true, sort: "date", sortDir: 1, statusFilter: "active", project: "", weekStart: "", boardDate: "", theme: "", invSort: "date", invSortDir: 1 }, loadUi());
+if (!ui.fAll || typeof ui.fAll !== "object") ui.fAll = { status: ui.statusFilter || "active" };
+if (!ui.fInv || typeof ui.fInv !== "object") ui.fInv = { status: "all", invoiced: "no" };
 const todayStr = () => DJ.ymd(new Date());
 if (!ui.boardDate) ui.boardDate = todayStr();
 if (!ui.weekStart) ui.weekStart = DJ.mondayOf(todayStr());
@@ -726,27 +956,48 @@ function renderSide() {
 }
 
 /* ================= Views ================= */
+// Filter bar shared by All jobs and Invoicing. f is ui.fAll or ui.fInv (kept between visits).
+function filterBar(f, withInvoice) {
+  const sel = (k, label) => {
+    const vals = [...new Set(jobs.map(j => j[k]).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return '<select data-f="' + k + '" aria-label="' + label + '"' + (f[k] ? ' class="on"' : '') + '><option value="">' + label + ': all</option><option value="' + DJ.NONE + '"' + (f[k] === DJ.NONE ? ' selected' : '') + '>' + label + ': (empty)</option>' +
+      vals.map(v => '<option value="' + esc(v) + '"' + (f[k] === v ? ' selected' : '') + '>' + esc(v) + '</option>').join("") + '</select>';
+  };
+  const st = f.status || "all";
+  return '<div class="filters"><select data-f="status" aria-label="Status"' + (st !== "all" ? ' class="on"' : '') + '>' +
+    [["all", "Status: all"], ["active", "Not done"]].concat(DJ.STATUSES.map(s => [s, DJ.STATUS_LABEL[s]])).map(([v, l]) => '<option value="' + v + '"' + (st === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' +
+    (withInvoice ? '<select data-f="invoiced" aria-label="Invoiced"' + (f.invoiced && f.invoiced !== "all" ? ' class="on"' : '') + '>' + [["all", "Invoiced: all"], ["no", "Not invoiced"], ["yes", "Invoiced"]].map(([v, l]) => '<option value="' + v + '"' + ((f.invoiced || "all") === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' : '') +
+    sel("client", "Client") + sel("project", "Project") + sel("transporter", "Transporter") + sel("cargoType", "Cargo") +
+    '<label class="inl">From <input type="date" data-f="from" value="' + esc(f.from || "") + '"' + (f.from ? ' class="on"' : '') + '></label>' +
+    '<label class="inl">to <input type="date" data-f="to" value="' + esc(f.to || "") + '"' + (f.to ? ' class="on"' : '') + '></label>' +
+    (withInvoice ? '<input data-f="invoiceNo" placeholder="Invoice no contains…" value="' + esc(f.invoiceNo || "") + '"' + (f.invoiceNo ? ' class="on"' : '') + '>' : '') +
+    '<button type="button" data-fclear>Clear filters</button></div>';
+}
+function wireFilters(f, defaults) {
+  $("#main").querySelectorAll("[data-f]").forEach(el => el.addEventListener(el.type === "text" || el.tagName === "INPUT" && !el.type.startsWith("date") ? "input" : "change", () => {
+    f[el.dataset.f] = el.value; saveUi();
+    const k = el.dataset.f, pos = el.selectionStart; render();
+    const again = $("#main").querySelector('[data-f="' + k + '"]'); if (again && again.tagName === "INPUT" && again.type === "text") { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) { } }
+  }));
+  $("#main").querySelector("[data-fclear]").onclick = () => { for (const k of Object.keys(f)) delete f[k]; Object.assign(f, defaults); saveUi(); render(); };
+}
+function money(n) { return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
 function renderAll() {
   const q = $("#search").value;
-  let list = jobs.filter(j => DJ.matches(j, q));
-  if (ui.statusFilter === "active") list = list.filter(j => j.status !== "done");
-  else if (ui.statusFilter !== "all") list = list.filter(j => j.status === ui.statusFilter);
+  const list = DJ.sortJobs(DJ.applyFilters(jobs.filter(j => DJ.matches(j, q)), ui.fAll), ui.sort, ui.sortDir);
   const k = ui.sort, dir = ui.sortDir;
-  list.sort((a, b) => {
-    let x = a[k] || "", y = b[k] || "";
-    if (k === "weight" || k === "pieces" || k === "price") { x = +x || 0; y = +y || 0; }
-    if (k === "status") { x = DJ.STATUSES.indexOf(a.status); y = DJ.STATUSES.indexOf(b.status); }
-    return (x < y ? -1 : x > y ? 1 : 0) * dir || byDate(a, b);
-  });
-  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
+  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
   $("#main").innerHTML =
-    '<div class="toolbar"><h2>All jobs</h2><select id="statusFilter" aria-label="Status filter">' +
-    [["active", "Not done"], ["all", "All statuses"]].concat(DJ.STATUSES.map(s => [s, DJ.STATUS_LABEL[s]])).map(([v, l]) => '<option value="' + v + '"' + (ui.statusFilter === v ? " selected" : "") + '>' + l + '</option>').join("") +
-    '</select><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div><button id="exportAll">Export to Excel</button></div>' +
+    '<div class="toolbar"><h2>All jobs</h2><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div>' +
+    '<button id="tplBtn" title="Excel file with all the job columns, to fill in and import">⬇ Excel template</button><button id="impBtn" title="Create many jobs at once from a filled-in template">⬆ Import from Excel</button><button id="exportAll">Export to Excel</button></div>' +
+    filterBar(ui.fAll, false) +
     (list.length ? '<div class="tablewrap"><table><thead><tr>' + cols.map(([c, l]) => '<th data-sort="' + c + '">' + l + (ui.sort === c ? (dir > 0 ? " ▲" : " ▼") : "") + '</th>').join("") + '<th>☑</th></tr></thead><tbody>' +
       list.map(j => '<tr class="row" data-id="' + esc(j.id) + '">' + cols.map(([c]) => '<td>' + (c === "status" ? pill(j.status) : c === "date" ? esc(j.date ? fmtDate(j.date) : "—") : (c === "weight" || c === "pieces") && j[c] ? esc(Number(j[c]).toLocaleString()) : c === "price" && j.price !== "" ? esc(Number(j.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : hl(j[c], q)) + '</td>').join("") + '<td>' + progress(j) + '</td></tr>').join("") +
       '</tbody></table></div>' : '<div class="empty">No jobs here yet. Click “+ New job”, or ⋯ › Load demo data.</div>');
-  $("#statusFilter").onchange = e => { ui.statusFilter = e.target.value; saveUi(); render(); };
+  wireFilters(ui.fAll, { status: "active" });
+  $("#tplBtn").onclick = downloadTemplate;
+  $("#impBtn").onclick = () => $("#fileImport").click();
   $("#main").querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => { const c = th.dataset.sort; if (ui.sort === c) ui.sortDir *= -1; else { ui.sort = c; ui.sortDir = 1; } saveUi(); render(); });
   $("#exportAll").onclick = () => exportExcel(list, "Depot jobs " + todayStr(), "Jobs");
 }
@@ -861,6 +1112,95 @@ function printDaySheet(day) {
   window.print();
 }
 
+const invSel = new Set(); let invLast = null, invDraft = "";
+function renderInvoicing() {
+  const q = $("#search").value, f = ui.fInv, k = ui.invSort, dir = ui.invSortDir;
+  const list = DJ.sortJobs(DJ.applyFilters(jobs.filter(j => DJ.matches(j, q)), f), k, dir);
+  for (const id of [...invSel]) if (!jobs.some(j => j.id === id)) invSel.delete(id);
+  const sel = jobs.filter(j => invSel.has(j.id)), hidden = sel.filter(j => !list.includes(j)).length;
+  const sum = a => a.reduce((s, j) => s + (+j.price || 0), 0), all = list.length && list.every(j => invSel.has(j.id));
+  const cols = [["date", "Date"], ["status", "Status"], ["client", "Client"], ["project", "Project"], ["ref", "Ref"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["price", "Price €"], ["invoiceNo", "Invoice no"], ["invoicedOn", "Invoiced on"]];
+  $("#main").innerHTML =
+    '<div class="toolbar"><h2>Invoicing</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' shown</span><div class="spacer"></div><button id="exportInv">Export to Excel</button></div>' +
+    filterBar(f, true) +
+    '<div class="invbar"><span class="n">' + sel.length + ' selected</span>' + (sel.length ? '<span>€ ' + esc(money(sum(sel))) + '</span>' : '<span style="color:var(--muted)">click rows to select · Shift+click selects a range</span>') +
+    (hidden ? '<span style="color:var(--warn)">(' + hidden + ' hidden by filters)</span>' : '') +
+    '<div class="spacer"></div><input id="invNo" placeholder="Invoice no" maxlength="60" value="' + esc(invDraft) + '" aria-label="Invoice number">' +
+    '<button class="primary" id="invSet"' + (sel.length ? '' : ' disabled') + '>Set on selected</button><button id="invClear"' + (sel.some(j => j.invoiceNo) ? '' : ' disabled') + '>Remove invoice no</button><button id="invNone"' + (sel.length ? '' : ' disabled') + '>Clear selection</button></div>' +
+    (list.length ? '<div class="tablewrap"><table id="invTable"><thead><tr><th class="ck"><input type="checkbox" id="invAll" aria-label="Select all shown"' + (all ? ' checked' : '') + '></th>' +
+      cols.map(([c, l]) => '<th data-sort="' + c + '">' + l + (k === c ? (dir > 0 ? " ▲" : " ▼") : "") + '</th>').join("") + '<th></th></tr></thead><tbody>' +
+      list.map(j => '<tr class="irow' + (invSel.has(j.id) ? ' sel' : '') + '" data-iid="' + esc(j.id) + '"><td class="ck"><input type="checkbox" tabindex="-1" aria-label="Select"' + (invSel.has(j.id) ? ' checked' : '') + '></td>' +
+        cols.map(([c]) => '<td>' + (c === "status" ? pill(j.status) : c === "date" ? esc(j.date ? fmtDate(j.date) : "—") : c === "price" ? (j.price !== "" ? esc(money(j.price)) : "") : c === "invoiceNo" ? (j.invoiceNo ? '<span class="inv-yes">' + hl(j.invoiceNo, q) + '</span>' : '<span class="inv-no">—</span>') : c === "invoicedOn" ? esc(j.invoicedOn ? fmtDate(j.invoicedOn) : "") : hl(j[c], q)) + '</td>').join("") +
+        '<td><button type="button" class="ghost" data-open="' + esc(j.id) + '" title="Open the job" aria-label="Open the job">✎</button></td></tr>').join("") + '</tbody></table></div>' +
+      '<div class="foot">Shown: ' + list.length + ' jobs · € ' + esc(money(sum(list))) + ' · not invoiced: € ' + esc(money(sum(list.filter(j => !j.invoiceNo)))) + '</div>'
+      : '<div class="empty">No jobs match these filters.</div>');
+  wireFilters(f, { status: "all", invoiced: "no" });
+  $("#main").querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => { const c = th.dataset.sort; if (ui.invSort === c) ui.invSortDir *= -1; else { ui.invSort = c; ui.invSortDir = 1; } saveUi(); render(); });
+  $("#invNo").oninput = e => { invDraft = e.target.value; };
+  $("#invNo").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("#invSet").click(); } };
+  const ia = $("#invAll"); if (ia) ia.onclick = () => { if (all) list.forEach(j => invSel.delete(j.id)); else list.forEach(j => invSel.add(j.id)); render(); };
+  const tb = $("#invTable"); if (tb) tb.onclick = e => {
+    const op = e.target.closest("[data-open]"); if (op) { openEditor(op.dataset.open); return; }
+    const tr = e.target.closest("tr.irow"); if (!tr) return;
+    const id = tr.dataset.iid;
+    if (e.shiftKey && invLast) {
+      const a = list.findIndex(j => j.id === invLast), b = list.findIndex(j => j.id === id);
+      if (a >= 0 && b >= 0) { for (let i = Math.min(a, b); i <= Math.max(a, b); i++) invSel.add(list[i].id); window.getSelection && window.getSelection().removeAllRanges(); }
+    } else if (invSel.has(id)) invSel.delete(id); else invSel.add(id);
+    invLast = id; render();
+  };
+  $("#invNone").onclick = () => { invSel.clear(); render(); };
+  $("#invSet").onclick = async () => {
+    const no = $("#invNo").value.trim();
+    if (!no) { toast("Type the invoice number first"); $("#invNo").focus(); return; }
+    const other = sel.filter(j => j.invoiceNo && j.invoiceNo !== no);
+    if (other.length && !confirm(other.length + " of the selected jobs already have another invoice number (" + [...new Set(other.map(j => j.invoiceNo))].slice(0, 5).join(", ") + ").\n\nOK = replace it with " + no + "\nCancel = change nothing")) return;
+    try { await DB.setInvoice(sel, no); toast("Invoice " + no + " set on " + sel.length + " job" + (sel.length === 1 ? "" : "s")); invSel.clear(); invDraft = ""; await reload(); }
+    catch (err) { fail("Invoice number not saved", err); }
+  };
+  $("#invClear").onclick = async () => {
+    const withNo = sel.filter(j => j.invoiceNo); if (!withNo.length) return;
+    if (!confirm("Remove the invoice number from " + withNo.length + " job" + (withNo.length === 1 ? "" : "s") + "?")) return;
+    try { await DB.clearInvoice(withNo.map(j => j.id)); toast("Invoice number removed"); invSel.clear(); await reload(); }
+    catch (err) { fail("Not removed", err); }
+  };
+  $("#exportInv").onclick = () => exportExcel(list, "Invoicing " + todayStr(), "Invoicing", true);
+}
+
+/* ---------- Excel template + bulk import ---------- */
+function downloadTemplate() {
+  const rows = DJ.templateRows(seesPrices()), head = rows[2], st = head.indexOf("Status");
+  const bytes = DJ.xlsx(rows, "New jobs", { bold: [0, 2], freeze: 3, filterRow: null, widthFrom: 2, lists: [{ col: st, from: 4, to: 2000, values: DJ.STATUSES.map(s => DJ.STATUS_LABEL[s]) }] });
+  download("Depot jobs import template.xlsx", new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+}
+let importing = null;
+async function startImport(file) {
+  let parsed;
+  try { parsed = DJ.parseImport(await DJ.readXlsx(await file.arrayBuffer()), jobs); }
+  catch (e) { console.error(e); toast("Couldn't read " + file.name + ": " + (e && e.message ? e.message : e)); return; }
+  importing = parsed;
+  const n = parsed.jobs.length, nw = parsed.jobs.filter(x => x.warnings.length).length;
+  const cols = [["date", "Date"], ["time", "Time"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["status", "Status"]]);
+  $("#impBody").innerHTML = '<p><b>' + esc(file.name) + '</b> · ' + n + ' job' + (n === 1 ? '' : 's') + ' found' +
+    (parsed.project ? ' · project from the top: <b>' + esc(parsed.project) + '</b>' : '') + (nw ? ' · <span class="w">' + nw + ' with warnings (they will still be created)</span>' : '') + '</p>' +
+    parsed.problems.map(p => '<p class="w">' + esc(p) + '</p>').join("") +
+    (n ? '<div class="tablewrap"><table><thead><tr><th>Row</th>' + cols.map(c => '<th>' + c[1] + '</th>').join("") + '<th>Warnings</th></tr></thead><tbody>' +
+      parsed.jobs.map(x => '<tr><td>' + x.row + '</td>' + cols.map(([c]) => '<td>' + esc(c === "status" ? DJ.STATUS_LABEL[x.job.status] : c === "date" ? (x.job.date ? fmtDate(x.job.date) : "") : x.job[c]) + '</td>').join("") + '<td class="w">' + esc(x.warnings.join("; ")) + '</td></tr>').join("") +
+      '</tbody></table></div>' : '');
+  $("#impGo").disabled = !n; $("#impGo").textContent = "Create " + n + " job" + (n === 1 ? "" : "s");
+  $("#impDlg").showModal();
+}
+$("#fileImport").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) startImport(f); });
+document.querySelectorAll("[data-iclose]").forEach(b => b.onclick = () => { importing = null; $("#impDlg").close(); });
+$("#impGo").onclick = async () => {
+  if (!importing || !importing.jobs.length) return;
+  const btn = $("#impGo"); btn.disabled = true; btn.textContent = "Creating…";
+  try {
+    const n = await DB.importJobs(importing.jobs.map(x => x.job));
+    importing = null; $("#impDlg").close(); toast("Created " + n + " job" + (n === 1 ? "" : "s")); await reload();
+  } catch (err) { fail("Import stopped", err); btn.disabled = false; btn.textContent = "Try again"; await reload(); }
+};
+
 function render() {
   pendingRender = false;
   if (!me || !loaded) return;
@@ -868,9 +1208,10 @@ function render() {
   document.querySelectorAll(".admin-only").forEach(e => e.hidden = !isAdmin());
   document.querySelectorAll(".price-only").forEach(e => e.hidden = !seesPrices());
   if (ui.view === "users" && !isAdmin()) ui.view = "board";
+  if (ui.view === "invoicing" && !seesPrices()) ui.view = "board";
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === ui.view));
   $("#panel").classList.toggle("hidden", !ui.panel);
-  ({ all: renderAll, week: renderWeek, board: renderBoard, projects: renderProjects, users: renderUsers }[ui.view] || renderBoard)();
+  ({ all: renderAll, week: renderWeek, board: renderBoard, projects: renderProjects, users: renderUsers, invoicing: renderInvoicing }[ui.view] || renderBoard)();
   renderSide();
   refreshDatalists();
   if ($("#dlg").open) renderFiles();
@@ -884,10 +1225,10 @@ function refreshDatalists() {
 }
 
 /* ================= Export / backup ================= */
-function exportExcel(list, fileBase, sheet) {
+function exportExcel(list, fileBase, sheet, keepOrder) {
   if (!list.length) { toast("Nothing to export"); return; }
-  let rows = DJ.jobsToRows(list.slice().sort(byDate));
-  if (!seesPrices()) { const pi = rows[0].indexOf("Price (€)"); rows = rows.map(r => r.filter((_, i) => i !== pi)); }
+  let rows = DJ.jobsToRows(keepOrder ? list : list.slice().sort(byDate));
+  if (!seesPrices()) { const drop = ["Price (€)", "Invoice no", "Invoiced on"].map(h => rows[0].indexOf(h)); rows = rows.map(r => r.filter((_, i) => !drop.includes(i))); }
   const bytes = DJ.xlsx(rows, sheet);
   download(fileBase.replace(/[\\\/:*?"<>|]/g, "-") + ".xlsx", new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   toast("Exported " + list.length + " job" + (list.length === 1 ? "" : "s"));
@@ -937,12 +1278,13 @@ function openEditor(id, preset) {
   if (!j && preset && preset.date) base.status = "scheduled";
   for (const [k] of DJ.FIELDS) $("#f_" + k).value = base[k] == null ? "" : base[k];
   $("#f_status").value = base.status || "open";
+  $("#f_invoiceNo").value = base.invoiceNo || "";
   editingFrom = j ? j.updated : null;
   draftChecks = (j ? j.checklist : []).map(c => ({ ...c }));
   pendingFiles = [];
   $("#jobMeta").innerHTML = j ? '<div class="meta">Added by ' + esc(personName(j.createdBy)) + ' · last changed by ' + esc(personName(j.updatedBy)) + ', ' + esc(new Date(j.updated).toLocaleString()) + ' · <a href="#" id="showHist">show changes</a></div><div class="hist" id="hist" hidden></div>' : "";
   const sh = $("#showHist"); if (sh) sh.onclick = async ev => { ev.preventDefault(); const h = $("#hist"); h.hidden = false; h.textContent = "Loading…";
-    try { const rows = await DB.history(j.id); h.innerHTML = rows.map(r => '<div>' + esc(new Date(r.changed_at).toLocaleString()) + ' · <b>' + esc(personName(r.changed_by)) + '</b> · ' + esc(r.action === "update" ? "changed " + (DJ.changedFields(r.old_row, r.new_row).join(", ") || "nothing visible") : r.action === "file-insert" ? "attached " + ((r.new_row || {}).name || "a file") : r.action === "file-delete" ? "removed attachment " + ((r.old_row || {}).name || "") : r.action.replace("price-", "price ")) + '</div>').join("") || "No changes recorded."; }
+    try { const rows = await DB.history(j.id); h.innerHTML = rows.map(r => '<div>' + esc(new Date(r.changed_at).toLocaleString()) + ' · <b>' + esc(personName(r.changed_by)) + '</b> · ' + esc(r.action === "update" ? "changed " + (DJ.changedFields(r.old_row, r.new_row).join(", ") || "nothing visible") : r.action === "file-insert" ? "attached " + ((r.new_row || {}).name || "a file") : r.action === "file-delete" ? "removed attachment " + ((r.old_row || {}).name || "") : r.action === "invoice-delete" ? "removed invoice no " + ((r.old_row || {}).invoice_no || "") : r.action.startsWith("invoice-") ? "set invoice no " + ((r.new_row || {}).invoice_no || "") : r.action.replace("price-", "price ")) + '</div>').join("") || "No changes recorded."; }
     catch (e) { h.textContent = "Couldn't load changes."; } };
   renderChecks();
   renderFiles();
@@ -1038,7 +1380,7 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => $("#dlg
 $("#jobForm").addEventListener("submit", async e => {
   e.preventDefault(); if (saving) return;
   const data = {}; for (const [k] of DJ.FIELDS) data[k] = $("#f_" + k).value;
-  data.status = $("#f_status").value; data.checklist = draftChecks;
+  data.status = $("#f_status").value; data.checklist = draftChecks; data.invoiceNo = seesPrices() ? $("#f_invoiceNo").value : "";
   if (!seesPrices()) data.price = "";
   if (!DJ.FIELDS.some(([k]) => String(data[k]).trim())) { toast("Fill in at least one field"); return; }
   saving = true; $("#btnSave").disabled = true;
@@ -1074,6 +1416,8 @@ $("#btnMenu").onclick = () => $("#menuList").classList.toggle("open");
 $("#menuList").onclick = e => {
   const a = e.target.dataset.act; if (!a) return; $("#menuList").classList.remove("open");
   if (a === "backup") backup();
+  if (a === "template") downloadTemplate();
+  if (a === "import") $("#fileImport").click();
   if (a === "restore") $("#fileRestore").click();
   if (a === "signout") { sb.auth.signOut(); }
   if (a === "name") { const n = prompt("Your name, as others will see it:", me.full_name || ""); if (n != null) sb.from("profiles").update({ full_name: n.trim().slice(0, 120) }).eq("id", me.id).select().then(r => { if (r.error) fail("Not saved", r.error); else { toast("Saved"); reload(); } }); }
@@ -1141,6 +1485,22 @@ function selfTest() {
   ok("storage name is plain ASCII", DJ.storageName("Τιμολόγιο Μάιος 2026.PDF") === "2026.pdf" && DJ.storageName("C:\\x\\my file (1).xlsx") === "my_file_1.xlsx" && DJ.storageName("ΑΒΓ") === "file" && /^[A-Za-z0-9_.-]+$/.test(DJ.storageName("../../etc/passwd")));
   const sheet = DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", time: "14:00", client: "B", price: "99" }), DJ.cleanJob({ date: "2026-10-21", time: "09:00", client: "A", status: "scheduled" }), DJ.cleanJob({ date: "2026-10-21", client: "C", status: "done" }), DJ.cleanJob({ date: "2026-10-22", client: "D" })], "2026-10-21");
   ok("day sheet: that day, not done, by time, no price", sheet.map(r => r.client).join() === "A,B" && !("price" in sheet[0]));
+  const fj = [DJ.cleanJob({ client: "A", project: "P1", date: "2026-10-20", status: "done", invoiceNo: "INV-1" }), DJ.cleanJob({ client: "B", date: "2026-10-25" }), DJ.cleanJob({ client: "A", project: "" })];
+  ok("filters", DJ.applyFilters(fj, { client: "A" }).length === 2 && DJ.applyFilters(fj, { project: DJ.NONE }).length === 2 && DJ.applyFilters(fj, { status: "active" }).length === 2 &&
+    DJ.applyFilters(fj, { from: "2026-10-21" }).length === 1 && DJ.applyFilters(fj, { invoiced: "no" }).length === 2 && DJ.applyFilters(fj, { invoiceNo: "inv" }).length === 1);
+  ok("sort by invoice no", DJ.sortJobs(fj, "invoiceNo", -1)[0].invoiceNo === "INV-1" && DJ.sortJobs(fj, "client", 1).map(j => j.client).join("") === "AAB");
+  ok("excel dates", DJ.excelDate(46317).v === "2026-10-22" && DJ.excelDate("22/10/2026").v === "2026-10-22" && DJ.excelDate("2026-10-22").v === "2026-10-22" && DJ.excelDate("1.2.26").v === "2026-02-01" && DJ.excelDate("31/02/2026").bad && DJ.excelDate("soon").bad);
+  ok("excel times", DJ.excelTime(0.5).v === "12:00" && DJ.excelTime(46317.375).v === "09:00" && DJ.excelTime("9:30").v === "09:30" && DJ.excelTime(14).v === "14:00" && DJ.excelTime("25:00").bad);
+  ok("excel numbers", DJ.excelNum("21.000").v === "21000" && DJ.excelNum("350,50").v === "350.50" && DJ.excelNum(12.5).v === "12.5" && DJ.excelNum("abc").bad && DJ.excelNum(-1).bad);
+  const imp = DJ.parseImport([["Project (optional…):", "", "Resin 2026"], [], ["Client", "Shipping container", "Date", "Time", "Weight (kg)", "Status", "Project", "Invoice no"],
+    ["Ά Client", "mscu 1234566", 46317, 0.375, "21.000", "", "", ""], [], ["B", "MSCU1234567", "22/10/2026", "", "x", "Weird", "Own", "INV-9"], ["", "", "", "", "", "", "", ""]],
+    [DJ.cleanJob({ shippingContainer: "MSCU1234566", date: "2026-10-22" })]);
+  ok("import: header, top project, values", imp.project === "Resin 2026" && imp.jobs.length === 2 && imp.jobs[0].row === 4 && imp.jobs[0].job.project === "Resin 2026" && imp.jobs[1].job.project === "Own" &&
+    imp.jobs[0].job.shippingContainer === "MSCU1234566" && imp.jobs[0].job.date === "2026-10-22" && imp.jobs[0].job.time === "09:00" && imp.jobs[0].job.weight === "21000" && imp.jobs[0].job.status === "scheduled" && imp.jobs[1].job.invoiceNo === "INV-9");
+  ok("import: warnings", imp.jobs[0].warnings.some(w => /duplicate/.test(w)) && imp.jobs[1].warnings.some(w => /Weight/.test(w)) && imp.jobs[1].warnings.some(w => /status/.test(w)) && imp.jobs[1].warnings.some(w => /check digit|Shipping/.test(w)));
+  ok("import: no headings", DJ.parseImport([["a", "b"]], []).problems.length === 1);
+  const tx = new TextDecoder().decode(DJ.xlsx(DJ.templateRows(true), "T", { bold: [0, 2], freeze: 3, filterRow: null, lists: [{ col: 15, from: 4, to: 9, values: ["Open", "Done"] }] }));
+  ok("template xlsx", tx.includes('ySplit="3"') && tx.includes('sqref="P4:P9"') && !tx.includes("autoFilter") && tx.includes("Invoice no"));
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
   return { total, failed };
 }

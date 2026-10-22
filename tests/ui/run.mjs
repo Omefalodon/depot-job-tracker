@@ -8,10 +8,10 @@ const db = { profiles: [
   { id: "u-george", email: "george@test", full_name: "George", role: "admin", active: true },
   { id: "u-maria", email: "maria@test", full_name: "Maria", role: "office", active: true },
   { id: "u-new", email: "new@test", full_name: "", role: "office", active: false }],
-  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [] };
+  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [] };
 const objects = {}; // storage bucket job-files: path -> {size, contentType}
 const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'text/plain', 'application/vnd.ms-outlook'];
-const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id" };
+const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id", job_invoices: "job_id" };
 const sessions = new Map(); const pages = [];
 let seq = 0; const now = () => new Date(Date.now() + (seq++)).toISOString();
 function role(uid) { const p = db.profiles.find(p => p.id === uid); return p && p.active ? p.role : null; }
@@ -30,15 +30,15 @@ function handle(page, st) {
   }
   if (st.op === "remove") { if (pr) for (const k of st.paths) delete objects[k]; return { data: [], error: null }; }
   if (st.op === "sign") { if (!pr || !objects[st.path]) return { data: null, error: { message: "Object not found" } }; return { data: { signedUrl: "https://files.test/sign/" + st.path + (st.download ? "?download=" + encodeURIComponent(st.download) : "") }, error: null }; }
-  const allowed = st.table === "profiles" ? true : (st.table === "job_prices" || st.table === "job_files") ? pr : !!r;
-  let rows = T.filter(row => st.filters.every(([k, v]) => String(row[k]) === String(v)));
+  const allowed = st.table === "profiles" ? true : (st.table === "job_prices" || st.table === "job_files" || st.table === "job_invoices") ? pr : !!r;
+  let rows = T.filter(row => st.filters.every(([k, v]) => String(row[k]) === String(v)) && (st.ins || []).every(([k, arr]) => arr.map(String).includes(String(row[k]))));
   if (st.table === "profiles" && !r) rows = rows.filter(x => x.id === uid);
   if (!allowed) return st.op === "select" ? { data: [], error: null } : { data: null, error: { message: "permission denied" } };
   let out = rows; let changed = false;
-  if (st.op === "insert") { const row = Object.assign({ id: "j" + (seq++) }, st.row, st.table === "job_files" ? { uploaded_at: now(), uploaded_by: uid } : { created_at: now(), updated_at: now(), created_by: uid, updated_by: uid }); T.push(row); out = [row]; changed = true; }
-  if (st.op === "upsert") { const k = pk[st.table]; let ex = T.find(x => x[k] === st.row[k]); if (ex) Object.assign(ex, st.row, { updated_at: now(), updated_by: uid }); else { ex = Object.assign({}, st.row, { updated_at: now(), updated_by: uid }); T.push(ex); } out = [ex]; changed = true; }
+  if (st.op === "insert") { out = []; for (const one of [].concat(st.row)) { const row = Object.assign({ id: "j" + (seq++) }, one, st.table === "job_files" ? { uploaded_at: now(), uploaded_by: uid } : { created_at: now(), updated_at: now(), created_by: uid, updated_by: uid }); T.push(row); out.push(row); } changed = true; }
+  if (st.op === "upsert") { out = []; const k = pk[st.table]; for (const one of [].concat(st.row)) { let ex = T.find(x => x[k] === one[k]); if (ex) Object.assign(ex, one, { updated_at: now(), updated_by: uid }); else { ex = Object.assign({}, one, { updated_at: now(), updated_by: uid }); T.push(ex); } out.push(ex); } changed = true; }
   if (st.op === "update") { if (st.table === "profiles" && r !== "admin") { delete st.row.role; delete st.row.active; } rows.forEach(x => Object.assign(x, st.row, st.table === "profiles" ? {} : { updated_at: now(), updated_by: uid })); changed = rows.length > 0; }
-  if (st.op === "delete") { for (const x of rows) T.splice(T.indexOf(x), 1); if (st.table === "jobs") for (const x of rows) { db.job_prices = db.job_prices.filter(p => p.job_id !== x.id); db.job_files = db.job_files.filter(f => f.job_id !== x.id); } changed = true; }
+  if (st.op === "delete") { for (const x of rows) T.splice(T.indexOf(x), 1); if (st.table === "jobs") for (const x of rows) { db.job_prices = db.job_prices.filter(p => p.job_id !== x.id); db.job_files = db.job_files.filter(f => f.job_id !== x.id); db.job_invoices = db.job_invoices.filter(f => f.job_id !== x.id); } changed = true; }
   if (changed && st.table !== "profiles") setTimeout(() => pages.forEach(p => p.evaluate(() => window.__rt && window.__rt()).catch(() => { })), 50);
   const data = JSON.parse(JSON.stringify(out));
   return { data: st.single ? (data[0] || null) : data, error: null };
@@ -139,6 +139,36 @@ const sheetTxt = await G.evaluate(() => document.body.innerText);
 log('day sheet printed:', await G.evaluate(() => window.__printed), '| has container:', sheetTxt.includes('CSQU3054383'), '| price shown:', sheetTxt.includes('350'), '| app hidden:', !sheetTxt.includes('New job'));
 await G.screenshot({ path: new URL('./g-daysheet.png', import.meta.url).pathname }); await G.emulateMedia({ media: 'screen' });
 const [dsx] = await Promise.all([G.waitForEvent('download'), G.click('#bSheetX')]); await dsx.saveAs(new URL('./daysheet.xlsx', import.meta.url).pathname); log('day sheet excel:', dsx.suggestedFilename());
+// Excel template -> filled like in Excel -> import with preview
+await G.click('nav [data-view=all]');
+const [tpl] = await Promise.all([G.waitForEvent('download'), G.click('#tplBtn')]); const tplPath = new URL('./tpl.xlsx', import.meta.url).pathname, filled = new URL('./tpl-filled.xlsx', import.meta.url).pathname;
+await tpl.saveAs(tplPath); (await import('child_process')).execFileSync('python3', [new URL('./fill-template.py', import.meta.url).pathname, tplPath, filled]);
+const jobsBefore = db.jobs.length;
+await G.setInputFiles('#fileImport', filled); await G.waitForSelector('#impDlg[open]');
+log('import preview:', (await G.textContent('#impBody p')).trim(), '| rows:', await G.locator('#impBody tbody tr').count(), '| button:', await G.textContent('#impGo'));
+await G.click('#impGo'); await G.waitForTimeout(900);
+const added = db.jobs.slice(jobsBefore);
+log('imported:', added.length, added.map(j => [j.client, j.project, j.job_date, j.job_time, j.status, j.weight].join('/')).join(' | '));
+log('imported price/invoice:', db.job_prices.filter(p => added.some(j => j.id === p.job_id)).map(p => p.price), db.job_invoices.filter(p => added.some(j => j.id === p.job_id)).map(p => p.invoice_no));
+// Invoicing: filters, click + shift-click, one number on several jobs
+await G.click('nav [data-view=invoicing]');
+log('invoicing shows (not invoiced):', await G.locator('tr.irow').count());
+await G.locator('tr.irow').nth(0).click(); await G.locator('tr.irow').nth(2).click({ modifiers: ['Shift'] });
+log('selected:', (await G.textContent('.invbar .n')));
+await G.fill('#invNo', 'INV-2026-001'); await G.click('#invSet'); await G.waitForTimeout(700);
+log('invoice rows:', db.job_invoices.map(i => i.invoice_no).join(','), '| left not invoiced:', await G.locator('tr.irow').count());
+await G.selectOption('[data-f=invoiced]', 'yes'); await G.fill('[data-f=invoiceNo]', '2026-0'); await G.waitForTimeout(200);
+log('filter invoiced + contains:', await G.locator('tr.irow').count(), '| focus kept:', await G.evaluate(() => document.activeElement.dataset.f));
+await G.selectOption('[data-f=client]', 'Second'); log('filter client:', await G.locator('tr.irow').count());
+await G.click('[data-fclear]'); await G.selectOption('[data-f=invoiced]', 'all');
+await G.locator('tr.irow', { hasText: 'Second' }).click(); await G.click('#invClear'); await G.waitForTimeout(700);
+log('after remove:', db.job_invoices.map(i => i.invoice_no).join(','));
+await G.screenshot({ path: new URL('./g-invoicing.png', import.meta.url).pathname });
+// editor shows the invoice number and the history line
+await G.locator('tr.irow', { hasText: 'Ελληνική' }).locator('[data-open]').click();
+log('editor invoice no:', await G.inputValue('#f_invoiceNo')); await G.click('#jobForm [data-close]');
+log('depot has Invoicing tab:', await M.isVisible('nav [data-view=invoicing]'));
+await G.click('nav [data-view=all]'); await G.selectOption('[data-f=project]', 'Bulk Project'); log('all jobs project filter:', await G.locator('tr.row').count()); await G.click('[data-fclear]');
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });
