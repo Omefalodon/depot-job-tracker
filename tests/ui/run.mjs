@@ -48,7 +48,9 @@ async function open(name) {
   const ctx = await b.newContext({ viewport: { width: 1450, height: 900 } });
   await ctx.route('**/index.html', async r => { const res = await r.fetch(); const body = (await res.text()).replace(/ integrity="[^"]+"/, ''); r.fulfill({ response: res, body }); });
   await ctx.route('**/vendor/supabase-2.117.2.js', r => r.fulfill({ status: 200, contentType: 'application/javascript', body: fake }));
-  await ctx.route('https://api.open-meteo.com/**', r => r.fulfill({ status: 503, body: '' }));
+  const wxDays = [...Array(16)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d.toLocaleDateString('sv'); });
+  await ctx.route('https://api.open-meteo.com/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ daily: { time: wxDays, weather_code: wxDays.map(() => 1), temperature_2m_max: wxDays.map(() => 22), temperature_2m_min: wxDays.map(() => 14), precipitation_probability_max: wxDays.map(() => 10), precipitation_sum: wxDays.map(() => 0), wind_speed_10m_max: wxDays.map(() => 12), wind_gusts_10m_max: wxDays.map(() => 20) } }) }));
+  await ctx.addInitScript(() => { if (!localStorage.getItem('depotJobTracker.ui')) localStorage.setItem('depotJobTracker.ui', JSON.stringify({ view: 'week', weekStart: '2026-01-05', boardDate: '2026-01-05' })); });
   await ctx.route('https://files.test/**', r => r.fulfill({ status: 200, contentType: 'text/plain', headers: r.request().url().includes('download=') ? { 'content-disposition': 'attachment; filename="file.txt"' } : {}, body: 'file body' }));
   const p = await ctx.newPage(); pages.push(p); p._errs = [];
   p.on('pageerror', e => p._errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|Forecast/.test(m.text())) p._errs.push(m.text()); });
@@ -66,6 +68,11 @@ await G.fill('#lg_pw', 'pw-george-123'); await G.click('#lg_btn'); await G.waitF
 await M.fill('#lg_email', 'maria@test'); await M.fill('#lg_pw', 'pw-maria-123'); await M.click('#lg_btn'); await M.waitForSelector('#gate', { state: 'hidden' });
 await N.fill('#lg_email', 'new@test'); await N.fill('#lg_pw', 'pw-new-1234'); await N.click('#lg_btn'); await N.waitForTimeout(400);
 log('pending user sees:', (await N.textContent('#gateMsg')).slice(0, 70));
+// Week opens on this week (not the remembered old one) and shows the forecast; a past week says why it has none
+await G.click('nav [data-view=week]'); await G.waitForTimeout(500);
+log('week opens on this week:', (await G.textContent('.wgrid .wh.today')) !== null, '| weather lines:', await G.locator('.wx').count());
+await G.click('#wPrev'); await G.click('#wPrev'); log('past week note:', (await G.textContent('#main .toolbar')).match(/No forecast[^]*$/)?.[0]);
+await G.click('#wToday'); await G.click('nav [data-view=board]'); log('today board date ok:', await G.inputValue('#bDate') === new Date().toLocaleDateString('sv'));
 // self-test
 await G.click('#btnMenu'); await G.click('[data-act=selftest]'); log('selftest:', G._lastDialog);
 // George adds a job with a price

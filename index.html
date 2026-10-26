@@ -865,8 +865,10 @@ const ui = Object.assign({ wxPlace: "aspropyrgos", view: "board", panel: true, s
 if (!ui.fAll || typeof ui.fAll !== "object") ui.fAll = { status: ui.statusFilter || "active" };
 if (!ui.fInv || typeof ui.fInv !== "object") ui.fInv = { status: "all", invoiced: "no" };
 const todayStr = () => DJ.ymd(new Date());
-if (!ui.boardDate) ui.boardDate = todayStr();
-if (!ui.weekStart) ui.weekStart = DJ.mondayOf(todayStr());
+// Today and Week always open on today / this week; the remembered day from last time was confusing
+// (the Week view showed a past week, where there is no weather forecast).
+ui.boardDate = todayStr();
+ui.weekStart = DJ.mondayOf(todayStr());
 
 /* ================= Helpers ================= */
 const $ = s => document.querySelector(s);
@@ -936,6 +938,10 @@ async function refreshWeather(force) {
     wxLoading = false;
     if (ui.view === "week") { if (document.activeElement && document.activeElement.classList.contains("daynote")) wxPending = true; else render(); }
   }
+}
+function wxRange() { // shown when the week on screen is outside the forecast
+  const k = Object.keys(wx.days).sort(); if (!k.length) return "";
+  return "No forecast for this week · it covers " + fmtDate(k[0]) + " – " + fmtDate(k[k.length - 1]);
 }
 function wxHtml(day) {
   if (!DJ.WX_PLACES[ui.wxPlace] || wx.place !== ui.wxPlace) return "";
@@ -1020,7 +1026,7 @@ function renderWeek() {
     '<div class="toolbar"><h2>Week</h2><button id="wPrev" aria-label="Previous week">‹</button><button id="wToday">This week</button><button id="wNext" aria-label="Next week">›</button>' +
     '<strong>' + esc(fmtDate(start)) + ' – ' + esc(fmtDate(end)) + '</strong><span style="color:var(--muted)">Drag a job to a day and hour · click an empty slot to add a job there</span><div class="spacer"></div>' +
     '<label style="margin:0;display:flex;gap:6px;align-items:center">Weather <select id="wxPlace">' + [["", "Off"]].concat(Object.entries(DJ.WX_PLACES).map(([k, v]) => [k, v.name])).map(([k, v]) => '<option value="' + k + '"' + (ui.wxPlace === k ? ' selected' : '') + '>' + esc(v) + '</option>').join("") + '</select></label>' +
-    (ui.wxPlace ? '<span style="color:var(--muted);font-size:12px">' + esc(wx.error || (wxLoading ? "Loading forecast…" : wx.fetchedAt && wx.place === ui.wxPlace ? "Open-Meteo, updated " + new Date(wx.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "")) + '</span>' : '') + '</div>' +
+    (ui.wxPlace ? '<span style="color:var(--muted);font-size:12px">' + esc(wx.error || (wxLoading ? "Loading forecast…" : wx.fetchedAt && wx.place === ui.wxPlace ? (days.some(d => wx.days[d]) ? "Open-Meteo, updated " + new Date(wx.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : wxRange()) : "")) + '</span>' : '') + '</div>' +
     '<div class="wgrid">' + grid + '</div>' +
     (undated.length ? '<h3 style="margin:16px 0 8px;font-size:14px">Open jobs without a date (' + undated.length + ')</h3><div style="max-width:400px">' + undated.map(j => cardHtml(j, q, true)).join("") + '</div>' : '');
   $("#wPrev").onclick = () => { ui.weekStart = DJ.addDays(ui.weekStart, -7); saveUi(); render(); };
