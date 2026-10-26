@@ -176,6 +176,12 @@ await G.locator('tr.irow', { hasText: 'Ελληνική' }).locator('[data-open]
 log('editor invoice no:', await G.inputValue('#f_invoiceNo')); await G.click('#jobForm [data-close]');
 log('depot has Invoicing tab:', await M.isVisible('nav [data-view=invoicing]'));
 await G.click('nav [data-view=all]'); await G.selectOption('[data-f=project]', 'Bulk Project'); log('all jobs project filter:', await G.locator('tr.row').count()); await G.click('[data-fclear]');
+// Plan loads: 2 per day on weekdays for a week
+await G.click('nav [data-view=projects]'); await G.click('#planBtn');
+await G.fill('#pl_project', 'Bulk Project'); await G.fill('#pl_perDay', '2'); await G.fill('#pl_from', '2026-11-02'); await G.fill('#pl_to', '2026-11-08');
+log('plan summary:', await G.textContent('#pl_sum'));
+const nPlanBefore = db.jobs.length; await G.click('#pl_go'); await G.waitForTimeout(800);
+const planned = db.jobs.slice(nPlanBefore); log('planned:', planned.length, [...new Set(planned.map(j => j.job_date))].join(','), planned[0] && planned[0].client, planned[0] && planned[0].notes);
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });

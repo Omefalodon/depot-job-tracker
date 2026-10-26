@@ -194,6 +194,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     <div class="menu-list" id="menuList">
       <button data-act="template">Download Excel template for new jobs</button>
       <button data-act="import">Import jobs from Excel…</button>
+      <button data-act="plan">Plan loads for a project…</button>
       <hr>
       <button data-act="backup">Save a copy of all jobs (.json)</button>
       <button data-act="restore" class="admin-only" hidden>Import jobs from a demo backup…</button>
@@ -284,6 +285,28 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
 </dialog>
 <datalist id="dl_client"></datalist><datalist id="dl_project"></datalist><datalist id="dl_transporter"></datalist>
 <datalist id="dl_cargoType"></datalist><datalist id="dl_truckPlate"></datalist>
+<dialog id="planDlg">
+  <form id="planForm" method="dialog" autocomplete="off">
+    <div class="dlg-head"><h2>Plan loads for a project</h2><button type="button" class="ghost" data-pclose aria-label="Close">✕</button></div>
+    <div class="dlg-body">
+      <p style="margin:0 0 10px;color:var(--muted)">Creates one job per load, so you can fill in containers and plates as the trucks come.</p>
+      <div class="grid">
+        <div><label for="pl_project">Project</label><input id="pl_project" list="dl_project" maxlength="120" required></div>
+        <div><label for="pl_client">Client</label><input id="pl_client" list="dl_client" maxlength="120"></div>
+        <div><label for="pl_cargoType">Cargo type</label><input id="pl_cargoType" list="dl_cargoType" maxlength="120"></div>
+        <div><label for="pl_transporter">Transporter</label><input id="pl_transporter" list="dl_transporter" maxlength="120"></div>
+        <div><label for="pl_perDay">Loads per day</label><input id="pl_perDay" type="number" min="1" max="50" step="1" value="1" required></div>
+        <div></div>
+        <div><label for="pl_from">From</label><input id="pl_from" type="date" required></div>
+        <div><label for="pl_to">To</label><input id="pl_to" type="date" required></div>
+        <div></div>
+        <div class="wide"><label>Days</label><div id="pl_days" style="display:flex;gap:12px;flex-wrap:wrap"></div></div>
+        <div class="wide" id="pl_sum" style="font-weight:600"></div>
+      </div>
+    </div>
+    <div class="dlg-foot"><button type="submit" class="primary" id="pl_go">Create jobs</button><button type="button" data-pclose>Cancel</button></div>
+  </form>
+</dialog>
 <dialog id="impDlg">
   <div class="dlg-head"><h2>Import jobs from Excel</h2><button type="button" class="ghost" data-iclose aria-label="Close">✕</button></div>
   <div class="dlg-body" id="impBody"></div>
@@ -394,6 +417,18 @@ const DJ = (() => {
       else if (x !== y) return (x < y ? -1 : 1) * dir;
       return byDt(a, b);
     });
+  }
+
+  // ---------- planned loads: N open jobs per day for a project ----------
+  // p: {project, client, cargoType, transporter, perDay, from, to, days: [Mon..Sun booleans]}
+  function planLoads(p) {
+    const out = [], n = Math.max(0, Math.min(50, Math.floor(+p.perDay || 0)));
+    if (!n || !/^\d{4}-\d{2}-\d{2}$/.test(p.from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(p.to || "") || p.to < p.from) return out;
+    for (let d = p.from; d <= p.to && out.length <= 1000; d = addDays(d, 1)) {
+      if (!p.days[(parseYmd(d).getDay() + 6) % 7]) continue;
+      for (let i = 1; i <= n; i++) out.push(cleanJob({ project: p.project, client: p.client, cargoType: p.cargoType, transporter: p.transporter, date: d, status: "scheduled", notes: "Planned load " + i + " of " + n }));
+    }
+    return out;
   }
 
   // ---------- bulk import from Excel ----------
@@ -690,7 +725,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads };
 })();
 
 /* ================= Supabase ================= */
@@ -1074,7 +1109,7 @@ function renderProjects() {
   const sel = ui.project || names.find(n => n) || (names.length ? "" : null);
   const list = sel === null ? [] : jobs.filter(j => j.project.trim() === sel && DJ.matches(j, q)).sort(byDate);
   const count = n => jobs.filter(j => j.project.trim() === n && j.status !== "done").length + "/" + jobs.filter(j => j.project.trim() === n).length;
-  $("#main").innerHTML = '<div class="projects"><div class="plist"><div class="toolbar"><h2>Projects</h2></div>' +
+  $("#main").innerHTML = '<div class="projects"><div class="plist"><div class="toolbar"><h2>Projects</h2><div class="spacer"></div><button id="planBtn" title="Create a number of loads per day for a project, details filled in later">+ Plan loads</button></div>' +
     (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + '"><span>' + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
     '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div><button id="exportProj" class="primary">Export to Excel</button></div>' +
       (list.length ? '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Status</th><th>Client</th><th>Shipping cont.</th><th>HCT cont.</th><th>Truck</th><th>Cargo</th><th>Weight</th><th>Pieces</th><th>Ref</th><th>☑</th></tr></thead><tbody>' +
@@ -1082,7 +1117,38 @@ function renderProjects() {
         '</tbody></table></div>' + (list.length ? '<p style="color:var(--muted);font-size:12px">Total weight: ' + list.reduce((a, j) => a + (+j.weight || 0), 0).toLocaleString() + ' kg · Total pieces: ' + list.reduce((a, j) => a + (+j.pieces || 0), 0).toLocaleString() + (seesPrices() ? ' · Total price: € ' + list.reduce((a, j) => a + (+j.price || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '') + '</p>' : '') : '<div class="empty">No jobs match.</div>') : '') + '</div></div>';
   $("#main").querySelectorAll("[data-p]").forEach(b => b.onclick = () => { ui.project = b.dataset.p; saveUi(); render(); });
   const ex = $("#exportProj"); if (ex) ex.onclick = () => exportExcel(list, (sel || "No project") + " " + todayStr(), sel || "No project");
+  $("#planBtn").onclick = () => openPlan(sel || "");
 }
+
+/* ---------- plan loads ---------- */
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function planInput() {
+  return { project: $("#pl_project").value.trim(), client: $("#pl_client").value.trim(), cargoType: $("#pl_cargoType").value.trim(), transporter: $("#pl_transporter").value.trim(),
+    perDay: $("#pl_perDay").value, from: $("#pl_from").value, to: $("#pl_to").value, days: DAY_NAMES.map((_, i) => $("#pl_d" + i).checked) };
+}
+function planSummary() {
+  const p = planInput(), list = DJ.planLoads(p), days = new Set(list.map(j => j.date)).size;
+  $("#pl_sum").textContent = list.length ? "Creates " + list.length + " job" + (list.length === 1 ? "" : "s") + " (" + days + " day" + (days === 1 ? "" : "s") + " × " + (+p.perDay) + "), status Scheduled" + (list.length > 1000 ? " · too many, max 1000" : "") : "Nothing to create yet: pick the dates and days.";
+  $("#pl_go").disabled = !list.length || list.length > 1000 || !p.project;
+  return list;
+}
+function openPlan(project) {
+  const last = project ? jobs.filter(j => j.project === project).sort(byDate).pop() : null;
+  $("#pl_project").value = project; $("#pl_client").value = last ? last.client : ""; $("#pl_cargoType").value = last ? last.cargoType : ""; $("#pl_transporter").value = last ? last.transporter : "";
+  $("#pl_perDay").value = 1; $("#pl_from").value = DJ.addDays(todayStr(), 1); $("#pl_to").value = DJ.addDays(todayStr(), 5);
+  $("#pl_days").innerHTML = DAY_NAMES.map((d, i) => '<label style="display:flex;gap:4px;align-items:center;margin:0;color:var(--text);font-size:13px"><input type="checkbox" id="pl_d' + i + '" style="width:auto"' + (i < 5 ? ' checked' : '') + '>' + d + '</label>').join("");
+  planSummary(); $("#planDlg").showModal(); $("#pl_project").focus();
+}
+$("#planForm").addEventListener("input", planSummary);
+$("#planForm").addEventListener("change", planSummary);
+document.querySelectorAll("[data-pclose]").forEach(b => b.onclick = () => $("#planDlg").close());
+$("#planForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const list = planSummary(); if (!list.length || $("#pl_go").disabled) return;
+  $("#pl_go").disabled = true;
+  try { const n = await DB.importJobs(list); $("#planDlg").close(); toast("Planned " + n + " load" + (n === 1 ? "" : "s")); ui.project = list[0].project; saveUi(); await reload(); }
+  catch (err) { fail("Loads not created", err); $("#pl_go").disabled = false; await reload(); }
+});
 
 function wireDrag(sel, apply) {
   const main = $("#main");
@@ -1424,6 +1490,7 @@ $("#menuList").onclick = e => {
   if (a === "backup") backup();
   if (a === "template") downloadTemplate();
   if (a === "import") $("#fileImport").click();
+  if (a === "plan") openPlan(ui.view === "projects" ? ui.project : "");
   if (a === "restore") $("#fileRestore").click();
   if (a === "signout") { sb.auth.signOut(); }
   if (a === "name") { const n = prompt("Your name, as others will see it:", me.full_name || ""); if (n != null) sb.from("profiles").update({ full_name: n.trim().slice(0, 120) }).eq("id", me.id).select().then(r => { if (r.error) fail("Not saved", r.error); else { toast("Saved"); reload(); } }); }
@@ -1507,6 +1574,9 @@ function selfTest() {
   ok("import: no headings", DJ.parseImport([["a", "b"]], []).problems.length === 1);
   const tx = new TextDecoder().decode(DJ.xlsx(DJ.templateRows(true), "T", { bold: [0, 2], freeze: 3, filterRow: null, lists: [{ col: 15, from: 4, to: 9, values: ["Open", "Done"] }] }));
   ok("template xlsx", tx.includes('ySplit="3"') && tx.includes('sqref="P4:P9"') && !tx.includes("autoFilter") && tx.includes("Invoice no"));
+  const pl = DJ.planLoads({ project: "P", client: "C", perDay: 3, from: "2026-10-30", to: "2026-11-02", days: [true, true, true, true, true, false, false] });
+  ok("plan loads: weekdays only, n per day", pl.length === 6 && pl[0].date === "2026-10-30" && pl[3].date === "2026-11-02" && pl[2].notes === "Planned load 3 of 3" && pl.every(j => j.status === "scheduled" && j.project === "P"));
+  ok("plan loads: bad input", DJ.planLoads({ perDay: 2, from: "2026-11-02", to: "2026-11-01", days: [true, true, true, true, true, true, true] }).length === 0);
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
   return { total, failed };
 }
