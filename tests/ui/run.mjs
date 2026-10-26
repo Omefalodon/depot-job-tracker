@@ -182,6 +182,17 @@ await G.fill('#pl_project', 'Bulk Project'); await G.fill('#pl_perDay', '2'); aw
 log('plan summary:', await G.textContent('#pl_sum'));
 const nPlanBefore = db.jobs.length; await G.click('#pl_go'); await G.waitForTimeout(800);
 const planned = db.jobs.slice(nPlanBefore); log('planned:', planned.length, [...new Set(planned.map(j => j.job_date))].join(','), planned[0] && planned[0].client, planned[0] && planned[0].notes);
+// Fill a planned load: open the slot, pick one of the project's jobs, it moves to that day
+const slotJob = db.jobs.find(j => j.is_slot); const unitJob = db.jobs.find(j => !j.is_slot && j.project === slotJob.project && j.status !== 'done' && j.shipping_container);
+await G.click('nav [data-view=week]'); await G.evaluate(d => { ui.weekStart = DJ.mondayOf(d); render(); }, slotJob.job_date); await G.waitForTimeout(200);
+await G.locator('.card.planned').first().click();
+log('slot editor:', await G.textContent('#dlgTitle'), '| client field hidden:', await G.isHidden('#f_client'), '| options:', await G.locator('#slotPick option').count());
+await G.selectOption('#slotPick', unitJob.id); log('details shown:', (await G.textContent('#slotBox .det')).includes(unitJob.shipping_container));
+const plannedBefore = db.jobs.filter(j => j.is_slot).length;
+await G.click('#slotUse'); await G.waitForTimeout(900);
+const moved = db.jobs.find(j => j.id === unitJob.id);
+log('filled:', moved.job_date === slotJob.job_date, moved.status, '| slots left:', db.jobs.filter(j => j.is_slot).length, "of", plannedBefore, '| editor now on job:', await G.textContent('#dlgTitle'));
+await G.click('#jobForm [data-close]');
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });

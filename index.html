@@ -151,6 +151,13 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
 #impDlg{width:min(1100px,96vw)}
 #impBody table td,#impBody table th{font-size:12px;padding:4px 6px;cursor:default}
 #impBody .w{color:var(--warn)}
+.card.planned{border-style:dashed;background:transparent}
+.card.planned .t span:first-child{font-style:italic}
+#jobForm.slotmode .grid>div:not(.slotkeep){display:none}
+.slotbox{background:var(--accent-weak);border-radius:8px;padding:10px 12px}
+.slotbox select{margin:4px 0 8px}
+.slotbox .det{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:13px;margin:6px 0 10px}
+.slotbox .det b{color:var(--muted);font-weight:normal}
 #printSheet{display:none}
 @media print{
   body>*:not(#printSheet){display:none!important}
@@ -241,6 +248,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     <div class="dlg-head"><h2 id="dlgTitle">New job</h2><button type="button" class="ghost" data-close aria-label="Close">✕</button></div>
     <div class="dlg-body">
       <div class="grid">
+        <div class="wide slotkeep" id="slotBox" hidden></div>
         <div><label for="f_client">Client</label><input id="f_client" name="client" list="dl_client" maxlength="120"></div>
         <div><label for="f_project">Project</label><input id="f_project" name="project" list="dl_project" maxlength="120"></div>
         <div><label for="f_ref">Ref</label><input id="f_ref" name="ref" maxlength="80"></div>
@@ -253,9 +261,9 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
         <div><label for="f_pieces">Pieces</label><input id="f_pieces" name="pieces" type="number" min="0" step="1" inputmode="numeric"></div>
         <div class="price-only"><label for="f_invoiceNo">Invoice no</label><input id="f_invoiceNo" maxlength="60"></div>
         <div class="price-only"><label for="f_price">Price (€)</label><input id="f_price" name="price" type="number" min="0" step="0.01" inputmode="decimal"></div>
-        <div><label for="f_date">Date</label><input id="f_date" name="date" type="date"></div>
-        <div><label for="f_time">Time</label><input id="f_time" name="time" type="time" step="900"></div>
-        <div><label for="f_status">Status</label>
+        <div class="slotkeep"><label for="f_date">Date</label><input id="f_date" name="date" type="date"></div>
+        <div class="slotkeep"><label for="f_time">Time</label><input id="f_time" name="time" type="time" step="900"></div>
+        <div class="slotkeep"><label for="f_status">Status</label>
           <select id="f_status" name="status">
             <option value="open">Open</option><option value="scheduled">Scheduled</option>
             <option value="in-progress">In progress</option><option value="done">Done</option>
@@ -272,7 +280,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
           <div class="flist" id="fileList"></div>
           <input type="file" id="filePick" multiple hidden>
         </div>
-        <div class="wide" id="jobMeta"></div>
+        <div class="wide slotkeep" id="jobMeta"></div>
       </div>
     </div>
     <div class="dlg-foot">
@@ -289,7 +297,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
   <form id="planForm" method="dialog" autocomplete="off">
     <div class="dlg-head"><h2>Plan loads for a project</h2><button type="button" class="ghost" data-pclose aria-label="Close">✕</button></div>
     <div class="dlg-body">
-      <p style="margin:0 0 10px;color:var(--muted)">Creates one job per load, so you can fill in containers and plates as the trucks come.</p>
+      <p style="margin:0 0 10px;color:var(--muted)">Creates empty load slots per day. When a load goes, open its slot and pick which of the project's containers it was; that job then moves to the slot's day with all its details.</p>
       <div class="grid">
         <div><label for="pl_project">Project</label><input id="pl_project" list="dl_project" maxlength="120" required></div>
         <div><label for="pl_client">Client</label><input id="pl_client" list="dl_client" maxlength="120"></div>
@@ -426,7 +434,7 @@ const DJ = (() => {
     if (!n || !/^\d{4}-\d{2}-\d{2}$/.test(p.from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(p.to || "") || p.to < p.from) return out;
     for (let d = p.from; d <= p.to && out.length <= 1000; d = addDays(d, 1)) {
       if (!p.days[(parseYmd(d).getDay() + 6) % 7]) continue;
-      for (let i = 1; i <= n; i++) out.push(cleanJob({ project: p.project, client: p.client, cargoType: p.cargoType, transporter: p.transporter, date: d, status: "scheduled", notes: "Planned load " + i + " of " + n }));
+      for (let i = 1; i <= n; i++) out.push(cleanJob({ project: p.project, client: p.client, cargoType: p.cargoType, transporter: p.transporter, date: d, status: "scheduled", notes: "Planned load " + i + " of " + n, slot: true }));
     }
     return out;
   }
@@ -575,6 +583,7 @@ const DJ = (() => {
     if (out.date && !/^\d{4}-\d{2}-\d{2}$/.test(out.date)) out.date = "";
     out.time = /^([01]\d|2[0-3]):[0-5]\d/.test(out.time) ? out.time.slice(0, 5) : "";
     out.status = STATUSES.includes(j.status) ? j.status : "open";
+    out.slot = !!j.slot;
     out.invoiceNo = String(j.invoiceNo == null ? "" : j.invoiceNo).trim().slice(0, 60);
     out.invoicedOn = /^\d{4}-\d{2}-\d{2}$/.test(j.invoicedOn || "") ? j.invoicedOn : "";
     out.checklist = Array.isArray(j.checklist) ? j.checklist.filter(c => c && String(c.text || "").trim())
@@ -586,7 +595,16 @@ const DJ = (() => {
     return out;
   }
 
-  function title(j) { return j.shippingContainer || j.hctContainer || j.ref || j.client || "(untitled job)"; }
+  function title(j) { return j.slot ? "Planned load" + (j.project ? " · " + j.project : "") : j.shippingContainer || j.hctContainer || j.ref || j.client || "(untitled job)"; }
+  // Jobs of the slot's project that can fill it: real (not planned) jobs that aren't done yet
+  function slotCandidates(jobs, slot) { return jobs.filter(j => !j.slot && j.status !== "done" && j.project === slot.project).sort((a, b) => (a.date ? 1 : 0) - (b.date ? 1 : 0) || String(a.ref || a.shippingContainer).localeCompare(String(b.ref || b.shippingContainer), undefined, { numeric: true })); }
+  function unitLabel(j) { return [j.shippingContainer, j.hctContainer && "HCT " + j.hctContainer, j.ref && "Ref " + j.ref].filter(Boolean).join(" · ") || j.client || "(job without container or ref)"; }
+  // The real job takes the slot's day, time and status; anything typed on the slot fills its empty fields
+  function fillSlot(slot, unit) {
+    const out = Object.assign({}, unit, { date: slot.date, time: slot.time || unit.time, status: slot.status === "open" ? "scheduled" : slot.status, slot: false });
+    for (const [k] of FIELDS) if (k !== "notes" && k !== "price" && !String(out[k] || "").trim() && String(slot[k] || "").trim()) out[k] = slot[k];
+    return cleanJob(Object.assign(out, { id: unit.id, created: unit.created, updated: unit.updated, createdBy: unit.createdBy, updatedBy: unit.updatedBy, checklist: unit.checklist.concat(slot.checklist) }));
+  }
 
   /* ---- Minimal .xlsx writer: stored (uncompressed) ZIP, inline strings. No libraries, no network. ---- */
   const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -705,14 +723,14 @@ const DJ = (() => {
     for (const k in COLS) r[COLS[k]] = c[k];
     for (const k of ["weight", "pieces"]) r[COLS[k]] = c[k] === "" ? null : +c[k];
     r.job_date = c.date || null; r.job_time = c.time || null;
-    r.status = c.status; r.checklist = c.checklist;
+    r.status = c.status; r.checklist = c.checklist; r.is_slot = c.slot;
     return r;
   }
   function fromRow(r, priceRow, invRow) {
     const j = { id: r.id };
     for (const k in COLS) j[k] = r[COLS[k]] == null ? "" : r[COLS[k]];
     j.time = j.time ? String(j.time).slice(0, 5) : "";
-    j.status = r.status; j.checklist = r.checklist;
+    j.status = r.status; j.checklist = r.checklist; j.slot = !!r.is_slot;
     j.price = priceRow && priceRow.price != null ? priceRow.price : "";
     j.invoiceNo = invRow ? invRow.invoice_no : ""; j.invoicedOn = invRow ? invRow.invoiced_on : "";
     j.created = r.created_at; j.updated = r.updated_at; j.createdBy = r.created_by; j.updatedBy = r.updated_by;
@@ -721,11 +739,11 @@ const DJ = (() => {
   // Which fields differ between two history rows (for the "Changes" list)
   function changedFields(oldRow, newRow) {
     if (!oldRow || !newRow) return [];
-    const names = { status: "Status", checklist: "Checklist", price: "Price" }; for (const [k, l] of FIELDS) if (COLS[k]) names[COLS[k]] = l;
+    const names = { status: "Status", checklist: "Checklist", price: "Price", is_slot: "Planned load" }; for (const [k, l] of FIELDS) if (COLS[k]) names[COLS[k]] = l;
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot };
 })();
 
 /* ================= Supabase ================= */
@@ -933,11 +951,11 @@ function progress(j) {
 function cardHtml(j, q, draggable, compact) {
   if (compact) {
     const line = [j.time, j.client, j.truckPlate, j.pieces ? j.pieces + " pcs" : ""].filter(Boolean).join(" · ");
-    return '<div class="card compact st-' + j.status + '" data-id="' + esc(j.id) + '"' + (draggable ? ' draggable="true"' : '') + ' title="' + esc(DJ.STATUS_LABEL[j.status] + (j.cargoType ? " · " + j.cargoType : "") + (j.project ? " · " + j.project : "")) + '">' +
+    return '<div class="card compact st-' + j.status + (j.slot ? ' planned' : '') + '" data-id="' + esc(j.id) + '"' + (draggable ? ' draggable="true"' : '') + ' title="' + esc(DJ.STATUS_LABEL[j.status] + (j.cargoType ? " · " + j.cargoType : "") + (j.project ? " · " + j.project : "")) + '">' +
       '<div class="t"><span>' + hl(DJ.title(j), q) + '</span>' + progress(j) + '</div><div class="m">' + hl(line, q) + '</div></div>';
   }
   const sub = [j.client, j.truckPlate, j.cargoType, j.weight ? Number(j.weight).toLocaleString() + " kg" : "", j.pieces ? Number(j.pieces).toLocaleString() + " pcs" : ""].filter(Boolean).join(" · ");
-  return '<div class="card st-' + j.status + (compact ? ' compact' : '') + '" data-id="' + esc(j.id) + '"' + (draggable ? ' draggable="true"' : '') + '>' +
+  return '<div class="card st-' + j.status + (compact ? ' compact' : '') + (j.slot ? ' planned' : '') + '" data-id="' + esc(j.id) + '"' + (draggable ? ' draggable="true"' : '') + '>' +
     '<div class="t"><span>' + hl(DJ.title(j), q) + '</span>' + pill(j.status) + '</div>' +
     '<div class="m">' + hl(sub, q) + '</div>' +
     (compact ? '<div class="m">' + (j.time ? esc(j.time) + ' · ' : '') + hl(j.project, q) + ' ' + progress(j) + '</div></div>' :
@@ -1128,14 +1146,14 @@ function planInput() {
 }
 function planSummary() {
   const p = planInput(), list = DJ.planLoads(p), days = new Set(list.map(j => j.date)).size;
-  $("#pl_sum").textContent = list.length ? "Creates " + list.length + " job" + (list.length === 1 ? "" : "s") + " (" + days + " day" + (days === 1 ? "" : "s") + " × " + (+p.perDay) + "), status Scheduled" + (list.length > 1000 ? " · too many, max 1000" : "") : "Nothing to create yet: pick the dates and days.";
+  $("#pl_sum").textContent = list.length ? "Creates " + list.length + " load slot" + (list.length === 1 ? "" : "s") + " (" + days + " day" + (days === 1 ? "" : "s") + " × " + (+p.perDay) + "), status Scheduled" + (list.length > 1000 ? " · too many, max 1000" : "") : "Nothing to create yet: pick the dates and days.";
   $("#pl_go").disabled = !list.length || list.length > 1000 || !p.project;
   return list;
 }
 function openPlan(project) {
   const last = project ? jobs.filter(j => j.project === project).sort(byDate).pop() : null;
   $("#pl_project").value = project; $("#pl_client").value = last ? last.client : ""; $("#pl_cargoType").value = last ? last.cargoType : ""; $("#pl_transporter").value = last ? last.transporter : "";
-  $("#pl_perDay").value = 1; $("#pl_from").value = DJ.addDays(todayStr(), 1); $("#pl_to").value = DJ.addDays(todayStr(), 5);
+  $("#pl_perDay").value = 1; $("#pl_from").value = todayStr(); $("#pl_to").value = DJ.addDays(todayStr(), 5);
   $("#pl_days").innerHTML = DAY_NAMES.map((d, i) => '<label style="display:flex;gap:4px;align-items:center;margin:0;color:var(--text);font-size:13px"><input type="checkbox" id="pl_d' + i + '" style="width:auto"' + (i < 5 ? ' checked' : '') + '>' + d + '</label>').join("");
   planSummary(); $("#planDlg").showModal(); $("#pl_project").focus();
 }
@@ -1146,7 +1164,7 @@ $("#planForm").addEventListener("submit", async e => {
   e.preventDefault();
   const list = planSummary(); if (!list.length || $("#pl_go").disabled) return;
   $("#pl_go").disabled = true;
-  try { const n = await DB.importJobs(list); $("#planDlg").close(); toast("Planned " + n + " load" + (n === 1 ? "" : "s")); ui.project = list[0].project; saveUi(); await reload(); }
+  try { const n = await DB.importJobs(list); $("#planDlg").close(); toast("Planned " + n + " load slot" + (n === 1 ? "" : "s")); ui.project = list[0].project; saveUi(); await reload(); }
   catch (err) { fail("Loads not created", err); $("#pl_go").disabled = false; await reload(); }
 });
 
@@ -1344,7 +1362,9 @@ let editing = null, editingFrom = null, draftChecks = [], pendingFiles = [], sav
 function openEditor(id, preset) {
   const j = id ? jobs.find(x => x.id === id) : null;
   editing = j ? j.id : null;
-  $("#dlgTitle").textContent = j ? "Edit job" : "New job";
+  $("#dlgTitle").textContent = j ? (j.slot ? "Planned load · " + (j.project || "no project") : "Edit job") : "New job";
+  $("#jobForm").classList.toggle("slotmode", !!(j && j.slot));
+  renderSlotBox(j && j.slot ? j : null, "");
   $("#btnDelete").hidden = !j;
   const base = j || Object.assign({ status: "open", date: ui.view === "board" ? ui.boardDate : "", project: ui.view === "projects" ? ui.project : "" }, preset || {});
   if (!j && preset && preset.date) base.status = "scheduled";
@@ -1439,6 +1459,29 @@ document.addEventListener("drop", e => {
   else { const ok = checkFiles(e.dataTransfer.files); if (ok.length) uploadMany(t.dataset.id, ok); }
 });
 
+/* ---------- planned load: pick which of the project's jobs this load is ---------- */
+function renderSlotBox(slot, pick) {
+  const box = $("#slotBox"); box.hidden = !slot; if (!slot) { box.innerHTML = ""; return; }
+  const cands = DJ.slotCandidates(jobs, slot), u = cands.find(c => c.id === pick);
+  const det = u ? DJ.FIELDS.filter(([k]) => k !== "price" || seesPrices()).filter(([k]) => String(u[k] || "").trim()).map(([k, l]) => '<b>' + esc(l) + '</b><span>' + esc(k === "date" ? fmtDate(u.date) : u[k]) + '</span>').join("") : "";
+  box.innerHTML = cands.length
+    ? '<label for="slotPick">Which container / HCT container / ref is this load?</label><select id="slotPick"><option value="">Choose…</option>' +
+      cands.map(c => '<option value="' + esc(c.id) + '"' + (c.id === pick ? ' selected' : '') + '>' + esc(DJ.unitLabel(c)) + (c.date ? ' (now on ' + esc(fmtDate(c.date)) + ')' : '') + '</option>').join("") + '</select>' +
+      (u ? '<div class="det">' + det + '</div><button type="button" class="primary" id="slotUse">Use this for the load on ' + esc(fmtDate(slot.date)) + '</button>' : '')
+    : '<p style="margin:0">No open jobs on project “' + esc(slot.project) + '” yet. Add the project\'s containers as jobs first (for example ⋯ › Import jobs from Excel, with the project name at the top), then come back to this load.</p>';
+  const ps = $("#slotPick"); if (ps) ps.onchange = () => renderSlotBox(slot, ps.value);
+  const us = $("#slotUse"); if (us) us.onclick = async () => {
+    us.disabled = true;
+    try {
+      const filled = DJ.fillSlot(Object.assign({}, slot, { date: $("#f_date").value || slot.date, time: $("#f_time").value, status: $("#f_status").value }), u);
+      const r = await DB.saveJob(filled, u.updated);
+      if (r.conflict) { toast("Someone just changed that job, try again"); await reload(); renderSlotBox(slot, pick); return; }
+      await DB.deleteJob(slot.id);
+      await reload(); toast(DJ.unitLabel(filled) + " set for " + fmtDate(filled.date));
+      openEditor(u.id);
+    } catch (err) { fail("Not saved", err); us.disabled = false; }
+  };
+}
 function renderChecks() {
   $("#checkList").innerHTML = draftChecks.map((c, i) => '<div class="ci' + (c.done ? ' done' : '') + '"><input type="checkbox" data-i="' + i + '"' + (c.done ? ' checked' : '') + ' aria-label="Done"><input type="text" data-i="' + i + '" value="' + esc(c.text) + '" maxlength="300" placeholder="Step"><button type="button" class="ghost" data-del="' + i + '" aria-label="Remove step">✕</button></div>').join("");
 }
@@ -1452,7 +1495,7 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => $("#dlg
 $("#jobForm").addEventListener("submit", async e => {
   e.preventDefault(); if (saving) return;
   const data = {}; for (const [k] of DJ.FIELDS) data[k] = $("#f_" + k).value;
-  data.status = $("#f_status").value; data.checklist = draftChecks; data.invoiceNo = seesPrices() ? $("#f_invoiceNo").value : "";
+  data.status = $("#f_status").value; data.checklist = draftChecks; data.invoiceNo = seesPrices() ? $("#f_invoiceNo").value : ""; { const cur = editing && jobs.find(x => x.id === editing); data.slot = !!(cur && cur.slot); }
   if (!seesPrices()) data.price = "";
   if (!DJ.FIELDS.some(([k]) => String(data[k]).trim())) { toast("Fill in at least one field"); return; }
   saving = true; $("#btnSave").disabled = true;
@@ -1577,6 +1620,11 @@ function selfTest() {
   const pl = DJ.planLoads({ project: "P", client: "C", perDay: 3, from: "2026-10-30", to: "2026-11-02", days: [true, true, true, true, true, false, false] });
   ok("plan loads: weekdays only, n per day", pl.length === 6 && pl[0].date === "2026-10-30" && pl[3].date === "2026-11-02" && pl[2].notes === "Planned load 3 of 3" && pl.every(j => j.status === "scheduled" && j.project === "P"));
   ok("plan loads: bad input", DJ.planLoads({ perDay: 2, from: "2026-11-02", to: "2026-11-01", days: [true, true, true, true, true, true, true] }).length === 0);
+  const unit = DJ.cleanJob({ id: "u1", project: "P", client: "C", shippingContainer: "MSCU1234566", ref: "R1", weight: 500, truckPlate: "" });
+  const slot = DJ.cleanJob({ id: "s1", project: "P", date: "2026-10-27", time: "10:00", status: "scheduled", truckPlate: "ikx1", slot: true, notes: "Planned load 1 of 2" });
+  ok("slot candidates", DJ.slotCandidates([unit, slot, DJ.cleanJob({ project: "P", status: "done" }), DJ.cleanJob({ project: "Q" })], slot).map(j => j.id).join() === "u1");
+  const filled = DJ.fillSlot(slot, unit);
+  ok("fill slot", filled.id === "u1" && filled.date === "2026-10-27" && filled.time === "10:00" && filled.truckPlate === "IKX1" && filled.weight === "500" && !filled.slot && filled.notes === "" && DJ.title(slot) === "Planned load · P");
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
   return { total, failed };
 }
