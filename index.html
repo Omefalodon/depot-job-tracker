@@ -268,6 +268,9 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
         <div><label for="f_client">Client</label><input id="f_client" name="client" list="dl_client" maxlength="120"></div>
         <div><label for="f_project">Project</label><input id="f_project" name="project" list="dl_project" maxlength="120"></div>
         <div><label for="f_ref">Ref</label><input id="f_ref" name="ref" maxlength="80"></div>
+        <div><label for="f_sender">Sender / Αποστολέας</label><input id="f_sender" name="sender" list="dl_sender" maxlength="120"></div>
+        <div><label for="f_receiver">Receiver / Παραλήπτης</label><input id="f_receiver" name="receiver" list="dl_receiver" maxlength="120"></div>
+        <div></div>
         <div><label for="f_shippingContainer">Shipping container</label><input id="f_shippingContainer" name="shippingContainer" maxlength="20" placeholder="e.g. MSCU1234566"><div class="hint" id="h_shippingContainer"></div></div>
         <div><label for="f_hctContainer">HCT container</label><input id="f_hctContainer" name="hctContainer" maxlength="20"><div class="hint" id="h_hctContainer"></div></div>
         <div><label for="f_truckPlate">Truck plate</label><input id="f_truckPlate" name="truckPlate" maxlength="20" list="dl_truckPlate"></div>
@@ -307,7 +310,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     </div>
   </form>
 </dialog>
-<datalist id="dl_client"></datalist><datalist id="dl_project"></datalist><datalist id="dl_transporter"></datalist>
+<datalist id="dl_client"></datalist><datalist id="dl_sender"></datalist><datalist id="dl_receiver"></datalist><datalist id="dl_project"></datalist><datalist id="dl_transporter"></datalist>
 <datalist id="dl_cargoType"></datalist><datalist id="dl_truckPlate"></datalist>
 <dialog id="planDlg">
   <form id="planForm" method="dialog" autocomplete="off">
@@ -347,7 +350,7 @@ const DJ = (() => {
   const STATUSES = ["open", "scheduled", "in-progress", "done"];
   const STATUS_LABEL = { "open": "Open", "scheduled": "Scheduled", "in-progress": "In progress", "done": "Done" };
   const FIELDS = [
-    ["client", "Client"], ["shippingContainer", "Shipping container"], ["hctContainer", "HCT container"],
+    ["client", "Client"], ["sender", "Sender (Αποστολέας)"], ["receiver", "Receiver (Παραλήπτης)"], ["shippingContainer", "Shipping container"], ["hctContainer", "HCT container"],
     ["truckPlate", "Truck plate"], ["transporter", "Transporter"], ["cargoType", "Cargo type"],
     ["weight", "Weight (kg)"], ["pieces", "Pieces"], ["price", "Price (€)"], ["date", "Date"], ["time", "Time"], ["project", "Project"], ["ref", "Ref"], ["notes", "Free text"]
   ];
@@ -425,7 +428,7 @@ const DJ = (() => {
     const is = (v, want) => !want || (want === NONE ? !v : v === want);
     return list.filter(j =>
       (!f.status || f.status === "all" || (f.status === "active" ? j.status !== "done" : j.status === f.status)) &&
-      is(j.client, f.client) && is(j.project, f.project) && is(j.transporter, f.transporter) && is(j.cargoType, f.cargoType) &&
+      is(j.client, f.client) && is(j.sender, f.sender) && is(j.receiver, f.receiver) && is(j.project, f.project) && is(j.transporter, f.transporter) && is(j.cargoType, f.cargoType) &&
       (!f.from || (j.date && j.date >= f.from)) && (!f.to || (j.date && j.date <= f.to)) &&
       (!f.invoiced || f.invoiced === "all" || (f.invoiced === "no" ? !j.invoiceNo : !!j.invoiceNo)) &&
       (!f.invoiceNo || String(j.invoiceNo || "").toLowerCase().includes(String(f.invoiceNo).trim().toLowerCase())));
@@ -456,8 +459,8 @@ const DJ = (() => {
   }
 
   // ---------- bulk import from Excel ----------
-  function normHead(s) { return String(s == null ? "" : s).toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9Ͱ-Ͽ]+/g, " ").trim(); }
-  const HEAD_KEYS = { status: "status", "invoice no": "invoiceNo", "invoice number": "invoiceNo", invoice: "invoiceNo", notes: "notes", description: "notes", weight: "weight", price: "price", plate: "truckPlate", "container": "shippingContainer" };
+  function normHead(s) { return String(s == null ? "" : s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9Ͱ-Ͽ]+/g, " ").trim(); }
+  const HEAD_KEYS = { "αποστολεας": "sender", "παραληπτης": "receiver", shipper: "sender", consignee: "receiver", status: "status", "invoice no": "invoiceNo", "invoice number": "invoiceNo", invoice: "invoiceNo", notes: "notes", description: "notes", weight: "weight", price: "price", plate: "truckPlate", "container": "shippingContainer" };
   for (const [k, l] of FIELDS) HEAD_KEYS[normHead(l)] = k;
   function templateHead(withPrices) { return FIELDS.filter(([k]) => withPrices || k !== "price").map(f => f[1]).concat(["Status"]).concat(withPrices ? ["Invoice no"] : []); }
   function templateRows(withPrices) {
@@ -733,7 +736,7 @@ const DJ = (() => {
   }
 
   /* ---- Database rows <-> app jobs ---- */
-  const COLS = { client: "client", shippingContainer: "shipping_container", hctContainer: "hct_container", truckPlate: "truck_plate", transporter: "transporter", cargoType: "cargo_type", weight: "weight", pieces: "pieces", date: "job_date", time: "job_time", project: "project", ref: "ref", notes: "notes" };
+  const COLS = { client: "client", sender: "sender", receiver: "receiver", shippingContainer: "shipping_container", hctContainer: "hct_container", truckPlate: "truck_plate", transporter: "transporter", cargoType: "cargo_type", weight: "weight", pieces: "pieces", date: "job_date", time: "job_time", project: "project", ref: "ref", notes: "notes" };
   function toRow(j) {
     const c = cleanJob(j), r = {};
     for (const k in COLS) r[COLS[k]] = c[k];
@@ -1048,7 +1051,7 @@ function filterBar(f, withInvoice) {
   return '<div class="filters"><select data-f="status" aria-label="Status"' + (st !== "all" ? ' class="on"' : '') + '>' +
     [["all", "Status: all"], ["active", "Not done"]].concat(DJ.STATUSES.map(s => [s, DJ.STATUS_LABEL[s]])).map(([v, l]) => '<option value="' + v + '"' + (st === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' +
     (withInvoice ? '<select data-f="invoiced" aria-label="Invoiced"' + (f.invoiced && f.invoiced !== "all" ? ' class="on"' : '') + '>' + [["all", "Invoiced: all"], ["no", "Not invoiced"], ["yes", "Invoiced"]].map(([v, l]) => '<option value="' + v + '"' + ((f.invoiced || "all") === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' : '') +
-    sel("client", "Client") + sel("project", "Project") + sel("transporter", "Transporter") + sel("cargoType", "Cargo") +
+    sel("client", "Client") + sel("sender", "Sender") + sel("receiver", "Receiver") + sel("project", "Project") + sel("transporter", "Transporter") + sel("cargoType", "Cargo") +
     '<label class="inl">From <input type="date" data-f="from" value="' + esc(f.from || "") + '"' + (f.from ? ' class="on"' : '') + '></label>' +
     '<label class="inl">to <input type="date" data-f="to" value="' + esc(f.to || "") + '"' + (f.to ? ' class="on"' : '') + '></label>' +
     (withInvoice ? '<input data-f="invoiceNo" placeholder="Invoice no contains…" value="' + esc(f.invoiceNo || "") + '"' + (f.invoiceNo ? ' class="on"' : '') + '>' : '') +
@@ -1068,7 +1071,7 @@ function renderAll() {
   const q = $("#search").value;
   const list = DJ.sortJobs(DJ.applyFilters(jobs.filter(j => DJ.matches(j, q)), ui.fAll), ui.sort, ui.sortDir);
   const k = ui.sort, dir = ui.sortDir;
-  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
+  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
   $("#main").innerHTML =
     '<div class="toolbar"><h2>All jobs</h2><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div>' +
     '<button id="tplBtn" title="Excel file with all the job columns, to fill in and import">⬇ Excel template</button><button id="impBtn" title="Create many jobs at once from a filled-in template">⬆ Import from Excel</button><button id="exportAll">Export to Excel</button></div>' +
@@ -1278,7 +1281,7 @@ function renderInvoicing() {
   for (const id of [...invSel]) if (!jobs.some(j => j.id === id)) invSel.delete(id);
   const sel = jobs.filter(j => invSel.has(j.id)), hidden = sel.filter(j => !list.includes(j)).length;
   const sum = a => a.reduce((s, j) => s + (+j.price || 0), 0), all = list.length && list.every(j => invSel.has(j.id));
-  const cols = [["date", "Date"], ["status", "Status"], ["client", "Client"], ["project", "Project"], ["ref", "Ref"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["price", "Price €"], ["invoiceNo", "Invoice no"], ["invoicedOn", "Invoiced on"]];
+  const cols = [["date", "Date"], ["status", "Status"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["project", "Project"], ["ref", "Ref"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["price", "Price €"], ["invoiceNo", "Invoice no"], ["invoicedOn", "Invoiced on"]];
   $("#main").innerHTML =
     '<div class="toolbar"><h2>Invoicing</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' shown</span><div class="spacer"></div><button id="exportInv">Export to Excel</button></div>' +
     filterBar(f, true) +
@@ -1339,7 +1342,7 @@ async function startImport(file) {
   catch (e) { console.error(e); toast("Couldn't read " + file.name + ": " + (e && e.message ? e.message : e)); return; }
   importing = parsed;
   const n = parsed.jobs.length, nw = parsed.jobs.filter(x => x.warnings.length).length;
-  const cols = [["date", "Date"], ["time", "Time"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["status", "Status"]]);
+  const cols = [["date", "Date"], ["time", "Time"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["status", "Status"]]);
   $("#impBody").innerHTML = '<p><b>' + esc(file.name) + '</b> · ' + n + ' job' + (n === 1 ? '' : 's') + ' found' +
     (parsed.project ? ' · project from the top: <b>' + esc(parsed.project) + '</b>' : '') + (nw ? ' · <span class="w">' + nw + ' with warnings (they will still be created)</span>' : '') + '</p>' +
     parsed.problems.map(p => '<p class="w">' + esc(p) + '</p>').join("") +
@@ -1378,7 +1381,7 @@ function render() {
 }
 
 function refreshDatalists() {
-  for (const k of ["client", "project", "transporter", "cargoType", "truckPlate"]) {
+  for (const k of ["client", "sender", "receiver", "project", "transporter", "cargoType", "truckPlate"]) {
     const vals = [...new Set(jobs.map(j => j[k]).filter(Boolean))].sort().slice(0, 300);
     $("#dl_" + k).innerHTML = vals.map(v => '<option value="' + esc(v) + '">').join("");
   }
@@ -1695,6 +1698,8 @@ function selfTest() {
   ok("slot candidates", DJ.slotCandidates([unit, slot, DJ.cleanJob({ project: "P", status: "done" }), DJ.cleanJob({ project: "Q" })], slot).map(j => j.id).join() === "u1");
   const filled = DJ.fillSlot(slot, unit);
   ok("fill slot", filled.id === "u1" && filled.date === "2026-10-27" && filled.time === "10:00" && filled.truckPlate === "IKX1" && filled.weight === "500" && !filled.slot && filled.notes === "" && DJ.title(slot) === "Planned load · P");
+  ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&
+    DJ.parseImport([["Client", "ΑΠΟΣΤΟΛΈΑΣ", "Παραλήπτης", "Date"], ["C", "Snd", "Rcv", ""]], []).jobs[0].job.receiver === "Rcv" && DJ.applyFilters([DJ.cleanJob({ sender: "X" }), DJ.cleanJob({})], { sender: "X" }).length === 1);
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
   return { total, failed };
 }

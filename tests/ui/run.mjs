@@ -155,7 +155,7 @@ await G.setInputFiles('#fileImport', filled); await G.waitForSelector('#impDlg[o
 log('import preview:', (await G.textContent('#impBody p')).trim(), '| rows:', await G.locator('#impBody tbody tr').count(), '| button:', await G.textContent('#impGo'));
 await G.click('#impGo'); await G.waitForTimeout(900);
 const added = db.jobs.slice(jobsBefore);
-log('imported:', added.length, added.map(j => [j.client, j.project, j.job_date, j.job_time, j.status, j.weight].join('/')).join(' | '));
+log('imported:', added.length, added.map(j => [j.client, j.sender, j.receiver, j.project, j.job_date, j.job_time, j.status, j.weight].join('/')).join(' | '));
 log('imported price/invoice:', db.job_prices.filter(p => added.some(j => j.id === p.job_id)).map(p => p.price), db.job_invoices.filter(p => added.some(j => j.id === p.job_id)).map(p => p.invoice_no));
 // Invoicing: filters, click + shift-click, one number on several jobs
 await G.click('nav [data-view=invoicing]');
