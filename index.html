@@ -81,7 +81,10 @@ tr.row{cursor:pointer} tr.row:hover td{background:var(--accent-weak)}
 .wgrid .wh h3{font-size:13px;margin:0 0 4px;display:flex;justify-content:space-between}
 .wgrid .wh.today{box-shadow:inset 0 -3px 0 var(--accent)}
 .wgrid .hr{font-size:11px;color:var(--muted);text-align:right;padding-right:6px;background:var(--surface2)}
-.wgrid .slot{min-height:42px;cursor:copy}
+.wgrid .slot{min-height:42px;cursor:copy;position:relative;padding-bottom:22px!important}
+.wgrid .slot .addslot{position:absolute;right:3px;bottom:2px;padding:0 7px;font-size:13px;line-height:18px;opacity:0;background:var(--surface)}
+.wgrid .slot:hover .addslot,.wgrid .slot .addslot:focus{opacity:1}
+@media (hover:none){.wgrid .slot .addslot{opacity:.7}}
 .wgrid .slot.today{background:var(--accent-weak)}
 .wgrid .slot.notime{min-height:50px;background:var(--surface2)}
 .wgrid .slot.dragover{outline:2px dashed var(--accent);outline-offset:-2px}
@@ -1011,7 +1014,8 @@ function renderSide() {
   const q = $("#search").value;
   const list = jobs.filter(j => j.status !== "done" && DJ.matches(j, q)).sort(byDate);
   $("#sideCount").textContent = list.length + " open job" + (list.length === 1 ? "" : "s") + (q ? " matching" : "");
-  $("#sideList").innerHTML = list.length ? list.map(j => cardHtml(j, q)).join("") : '<div class="empty">' + (q ? "No open jobs match." : "No open jobs.") + '</div>';
+  const drag = ui.view === "week" || ui.view === "board"; // side cards can be dropped on Week slots and Today columns
+  $("#sideList").innerHTML = list.length ? list.map(j => cardHtml(j, q, drag)).join("") : '<div class="empty">' + (q ? "No open jobs match." : "No open jobs.") + '</div>';
 }
 
 /* ================= Views ================= */
@@ -1070,14 +1074,15 @@ function renderWeek() {
   const inWeek = jobs.filter(j => j.date >= start && j.date <= end && DJ.matches(j, q)).sort(byDate);
   const undated = jobs.filter(j => !j.date && j.status !== "done" && DJ.matches(j, q));
   const cell = (d, slot) => '<div class="slot' + (slot ? '' : ' notime') + (d === today ? ' today' : '') + '" data-day="' + d + '" data-time="' + slot + '">' +
-    inWeek.filter(j => j.date === d && slotOf(j) === slot).map(j => cardHtml(j, q, true, true)).join("") + '</div>';
+    inWeek.filter(j => j.date === d && slotOf(j) === slot).map(j => cardHtml(j, q, true, true)).join("") +
+    '<button type="button" class="addslot" title="Add a job ' + esc(fmtDate(d)) + (slot ? ' at ' + slot : '') + '" aria-label="Add a job here">+</button></div>';
   let grid = '<div></div>' + days.map(d => '<div class="wh' + (d === today ? ' today' : '') + '"><h3><span>' + esc(fmtDate(d)) + '</span><span style="color:var(--muted)">' + inWeek.filter(j => j.date === d).length + '</span></h3>' + wxHtml(d) + '</div>').join("");
   grid += '<div class="hr" title="No time, or outside 08:00–17:00">Other</div>' + days.map(d => cell(d, "")).join("");
   for (const h of HOURS) { const sl = String(h).padStart(2, "0") + ":00"; grid += '<div class="hr">' + sl + '</div>' + days.map(d => cell(d, sl)).join(""); }
   grid += '<div class="hr">Notes</div>' + days.map(d => '<div class="notes"><textarea class="daynote" data-day="' + d + '" maxlength="4000" placeholder="Notes for this day…" aria-label="Notes for ' + esc(fmtDate(d)) + '">' + esc(dayNotes[d] || "") + '</textarea></div>').join("");
   $("#main").innerHTML =
     '<div class="toolbar"><h2>Week</h2><button id="wPrev" aria-label="Previous week">‹</button><button id="wToday">This week</button><button id="wNext" aria-label="Next week">›</button>' +
-    '<strong>' + esc(fmtDate(start)) + ' – ' + esc(fmtDate(end)) + '</strong><span style="color:var(--muted)">Drag a job to a day and hour · click an empty slot to add a job there</span><div class="spacer"></div>' +
+    '<strong>' + esc(fmtDate(start)) + ' – ' + esc(fmtDate(end)) + '</strong><span style="color:var(--muted)">Drag a job (also from the left panel) to a day and hour · + in a slot adds a job there</span><div class="spacer"></div>' +
     '<label style="margin:0;display:flex;gap:6px;align-items:center">Weather <select id="wxPlace">' + [["", "Off"]].concat(Object.entries(DJ.WX_PLACES).map(([k, v]) => [k, v.name])).map(([k, v]) => '<option value="' + k + '"' + (ui.wxPlace === k ? ' selected' : '') + '>' + esc(v) + '</option>').join("") + '</select></label>' +
     (ui.wxPlace ? '<span style="color:var(--muted);font-size:12px">' + esc(wx.error || (wxLoading ? "Loading forecast…" : wx.fetchedAt && wx.place === ui.wxPlace ? (days.some(d => wx.days[d]) ? "Open-Meteo, updated " + new Date(wx.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : wxRange()) : "")) + '</span>' : '') + '</div>' +
     '<div class="wgrid">' + grid + '</div>' +
@@ -1168,6 +1173,7 @@ $("#planForm").addEventListener("submit", async e => {
   catch (err) { fail("Loads not created", err); $("#pl_go").disabled = false; await reload(); }
 });
 
+$("#sideList").addEventListener("dragstart", e => { const c = e.target.closest(".card[draggable]"); if (c) { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; } });
 function wireDrag(sel, apply) {
   const main = $("#main");
   main.querySelectorAll('.card[draggable]').forEach(c => c.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; }));

@@ -193,6 +193,15 @@ await G.click('#slotUse'); await G.waitForTimeout(900);
 const moved = db.jobs.find(j => j.id === unitJob.id);
 log('filled:', moved.job_date === slotJob.job_date, moved.status, '| slots left:', db.jobs.filter(j => j.is_slot).length, "of", plannedBefore, '| editor now on job:', await G.textContent('#dlgTitle'));
 await G.click('#jobForm [data-close]');
+// Week: drag from the side panel into a slot, and add a second job to a slot that already has one
+await G.click('nav [data-view=week]'); await G.click('#wToday'); await G.waitForTimeout(200);
+const sideJob = await G.locator('#sideList .card[draggable]').first().getAttribute('data-id');
+const target = G.locator('.slot[data-time="11:00"]').nth(2); const tDay = await target.getAttribute('data-day');
+await G.locator('#sideList .card[data-id="' + sideJob + '"]').dragTo(target, { force: true }); await G.waitForTimeout(600);
+const sj = db.jobs.find(j => j.id === sideJob); log('side panel drag:', sj.job_date === tDay, sj.job_time);
+const nB = db.jobs.length; await target.hover(); await target.locator('.addslot').click(); log('add in busy slot:', await G.inputValue('#f_date') === tDay, await G.inputValue('#f_time'));
+await G.fill('#f_client', 'Second in slot'); await G.click('#btnSave'); await G.waitForTimeout(600);
+log('two jobs in slot:', db.jobs.length === nB + 1, await G.locator('.slot[data-day="' + tDay + '"][data-time="11:00"] .card').count());
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });
