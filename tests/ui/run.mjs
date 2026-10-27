@@ -8,7 +8,7 @@ const db = { profiles: [
   { id: "u-george", email: "george@test", full_name: "George", role: "admin", active: true },
   { id: "u-maria", email: "maria@test", full_name: "Maria", role: "office", active: true },
   { id: "u-new", email: "new@test", full_name: "", role: "office", active: false }],
-  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [] };
+  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [], suggestions: [], suggestion_votes: [] };
 const objects = {}; // storage bucket job-files: path -> {size, contentType}
 const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'text/plain', 'application/vnd.ms-outlook'];
 const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id", job_invoices: "job_id" };
@@ -35,7 +35,7 @@ function handle(page, st) {
   if (st.table === "profiles" && !r) rows = rows.filter(x => x.id === uid);
   if (!allowed) return st.op === "select" ? { data: [], error: null } : { data: null, error: { message: "permission denied" } };
   let out = rows; let changed = false;
-  if (st.op === "insert") { out = []; for (const one of [].concat(st.row)) { const row = Object.assign({ id: "j" + (seq++) }, one, st.table === "job_files" ? { uploaded_at: now(), uploaded_by: uid } : { created_at: now(), updated_at: now(), created_by: uid, updated_by: uid }); T.push(row); out.push(row); } changed = true; }
+  if (st.op === "insert") { out = []; for (const one of [].concat(st.row)) { const row = Object.assign({ id: "j" + (seq++) }, one, st.table === "job_files" ? { uploaded_at: now(), uploaded_by: uid } : st.table === "suggestions" ? Object.assign({ status: "new", admin_note: "" }, one, { created_at: now(), created_by: uid }) : st.table === "suggestion_votes" ? {} : { created_at: now(), updated_at: now(), created_by: uid, updated_by: uid }); T.push(row); out.push(row); } changed = true; }
   if (st.op === "upsert") { out = []; const k = pk[st.table]; for (const one of [].concat(st.row)) { let ex = T.find(x => x[k] === one[k]); if (ex) Object.assign(ex, one, { updated_at: now(), updated_by: uid }); else { ex = Object.assign({}, one, { updated_at: now(), updated_by: uid }); T.push(ex); } out.push(ex); } changed = true; }
   if (st.op === "update") { if (st.table === "profiles" && r !== "admin") { delete st.row.role; delete st.row.active; } rows.forEach(x => Object.assign(x, st.row, st.table === "profiles" ? {} : { updated_at: now(), updated_by: uid })); changed = rows.length > 0; }
   if (st.op === "delete") { for (const x of rows) T.splice(T.indexOf(x), 1); if (st.table === "jobs") for (const x of rows) { db.job_prices = db.job_prices.filter(p => p.job_id !== x.id); db.job_files = db.job_files.filter(f => f.job_id !== x.id); db.job_invoices = db.job_invoices.filter(f => f.job_id !== x.id); } changed = true; }
@@ -202,6 +202,13 @@ const sj = db.jobs.find(j => j.id === sideJob); log('side panel drag:', sj.job_d
 const nB = db.jobs.length; await target.hover(); await target.locator('.addslot').click(); log('add in busy slot:', await G.inputValue('#f_date') === tDay, await G.inputValue('#f_time'));
 await G.fill('#f_client', 'Second in slot'); await G.click('#btnSave'); await G.waitForTimeout(600);
 log('two jobs in slot:', db.jobs.length === nB + 1, await G.locator('.slot[data-day="' + tDay + '"][data-time="11:00"] .card').count());
+// Suggestions: depot Maria posts, George votes + sets status and reply, Maria votes once
+await M.click('nav [data-view=suggestions]'); await M.fill('#sugText', 'Bigger buttons on the Today board'); await M.click('#sugPost'); await M.waitForTimeout(700);
+await G.waitForTimeout(500); log('admin badge:', await G.textContent('#navSug'));
+await G.click('#navSug .navbadge'); await G.locator('.sug [data-vote]').first().click(); await G.waitForTimeout(500);
+await G.selectOption('.sug [data-status]', 'planned'); await G.waitForTimeout(500); await G.fill('.sug [data-note]', 'Next week'); await G.locator('.sug [data-note]').press('Tab'); await G.waitForTimeout(600);
+await M.waitForTimeout(400); await M.locator('.sug [data-vote]').first().click(); await M.waitForTimeout(600);
+log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.admin_note])), '| votes:', db.suggestion_votes.length, '| maria sees reply:', (await M.textContent('.sug')).includes('Next week'), '| maria has status menu:', await M.locator('.sug [data-status]').count()); await G.screenshot({ path: new URL('./g-sug.png', import.meta.url).pathname });
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });

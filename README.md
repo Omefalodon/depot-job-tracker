@@ -31,6 +31,11 @@ transporter, cargo, dates, invoice number); click rows to select (Shift+click fo
 number and press *Set on selected*. Office + admin only, like prices; every change is in the job's
 history.
 
+## Suggestions
+💡 Suggestions (top bar) is a board for ideas about the tracker: everyone approved can post and vote
+👍 once per idea; authors edit or delete their own; only an admin sets the status (New / Planned /
+Done / Not doing) and writes a reply. The badge counts New ones.
+
 ## Bulk import from Excel
 All jobs › *Excel template* downloads an .xlsx with every job column (row 3) and an optional
 project cell at the top (B1, used for rows with no project). *Import from Excel* reads the filled
@@ -55,7 +60,7 @@ recorded in `job_history` by a trigger, so the editor can show who changed what.
 ## Tests
 - **Self-test in the page:** ⋯ › Run self-test (logic: container check digit, dates, Excel writer…).
 - **Database rules:** paste `tests/rls-tests.sql` into the Supabase SQL editor; every row must say
-  `ok = true` (21 + 8 attachment + 9 invoice checks, three result tables; nothing is left behind).
+  `ok = true` (21 + 8 attachment + 9 invoice + 7 suggestion checks, four result tables; nothing is left behind).
 - **UI with two users:** `tests/ui/run.mjs` drives the page in Chromium with a stand-in for
   Supabase (`tests/ui/fake-supabase.js`): login, live updates between two users, edit conflicts,
   day notes, drag & drop, printable day sheet (no prices), Excel template filled by openpyxl

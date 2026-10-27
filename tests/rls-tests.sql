@@ -173,3 +173,43 @@ begin
   for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_inv(test, ok) values (r[i], b[i]); end loop;
 end $$;
 select test, ok from t_inv order by n;
+
+-- ===== Suggestions, added 2026-10-27. Run on its own; read the result table. =====
+create temp table if not exists t_sug (n serial, test text, ok boolean);
+do $$
+declare c int; sid uuid; err text; r text[] := array[]::text[]; b boolean[] := array[]::boolean[];
+begin
+  begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c3","role":"authenticated"}', true);
+  insert into public.suggestions (body, status, admin_note) values ('Bigger buttons', 'done', 'x') returning id into sid;
+  select count(*) into c from public.suggestions where id = sid and status = 'new' and admin_note = '' and created_by = '00000000-0000-4000-8000-0000000000c3';
+  r := array_append(r, 'depot: can post; cannot set status/reply'); b := array_append(b, c = 1);
+  insert into public.suggestion_votes (suggestion_id) values (sid);
+  begin insert into public.suggestion_votes (suggestion_id, user_id) values (sid, '00000000-0000-4000-8000-0000000000b2'); err := 'allowed'; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'cannot vote for someone else'); b := array_append(b, err = 'blocked');
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000b2","role":"authenticated"}', true);
+  update public.suggestions set body = 'hacked' where id = sid;
+  select count(*) into c from public.suggestions where id = sid and body = 'Bigger buttons';
+  r := array_append(r, 'office: cannot edit someone else''s text'); b := array_append(b, c = 1);
+  insert into public.suggestion_votes (suggestion_id) values (sid);
+  select count(*) into c from public.suggestion_votes where suggestion_id = sid;
+  r := array_append(r, 'two people voted'); b := array_append(b, c = 2);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+  update public.suggestions set status = 'planned', admin_note = 'Next week' where id = sid;
+  select count(*) into c from public.suggestions where id = sid and status = 'planned' and admin_note = 'Next week';
+  r := array_append(r, 'admin: sets status and reply'); b := array_append(b, c = 1);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000d4","role":"authenticated"}', true);
+  select count(*) into c from public.suggestions;
+  r := array_append(r, 'pending: sees no suggestions'); b := array_append(b, c = 0);
+  perform set_config('role', 'anon', true); perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  begin select count(*) into c from public.suggestions; err := 'allowed ' || c; exception when others then err := 'blocked'; end;
+  r := array_append(r, 'anon: nothing (' || err || ')'); b := array_append(b, err = 'blocked' or err = 'allowed 0');
+  raise exception 'rollback';
+  exception when others then
+    perform set_config('role', 'postgres', true);
+    if sqlerrm <> 'rollback' then r := array_append(r, 'SUITE CRASHED: ' || sqlerrm); b := array_append(b, false); end if;
+  end;
+  for i in 1 .. coalesce(array_length(r, 1), 0) loop insert into t_sug(test, ok) values (r[i], b[i]); end loop;
+end $$;
+select test, ok from t_sug order by n;

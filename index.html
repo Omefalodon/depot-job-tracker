@@ -161,6 +161,18 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
 .slotbox select{margin:4px 0 8px}
 .slotbox .det{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:13px;margin:6px 0 10px}
 .slotbox .det b{color:var(--muted);font-weight:normal}
+.sug-new{display:flex;gap:8px;align-items:flex-start;margin-bottom:14px;max-width:900px}
+.sug-new textarea{min-height:60px}
+.sug{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:12px;max-width:900px}
+.sug .vote{display:flex;flex-direction:column;align-items:center;min-width:52px;padding:4px 6px}
+.sug .vote.mine{border-color:var(--accent);background:var(--accent-weak);color:var(--accent)}
+.sug .b{white-space:pre-wrap;flex:1;min-width:0}
+.sug .m{font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sug .m a{color:var(--accent)}
+.sug .reply{margin-top:6px;font-size:13px;border-left:3px solid var(--accent);padding-left:8px}
+.sug select,.sug input{width:auto;padding:2px 6px;font-size:12px}
+.sp-new{color:var(--s-open)} .sp-planned{color:var(--s-scheduled)} .sp-done{color:var(--s-done)} .sp-declined{color:var(--muted)}
+.navbadge{display:inline-block;min-width:16px;padding:0 4px;margin-left:4px;border-radius:8px;background:var(--accent);color:#fff;font-size:11px;line-height:16px;text-align:center}
 #printSheet{display:none}
 @media print{
   body>*:not(#printSheet){display:none!important}
@@ -194,6 +206,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     <button data-view="board">Today</button>
     <button data-view="projects">Projects</button>
     <button data-view="invoicing" class="price-only" hidden>Invoicing</button>
+    <button data-view="suggestions" id="navSug">💡 Suggestions</button>
     <button data-view="users" id="navUsers" hidden>Users</button>
   </nav>
   <div class="spacer"></div>
@@ -757,7 +770,7 @@ if (!window.supabase) { document.body.innerHTML = "<p style=\"padding:20px\">The
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 let me = null;            // my profile row
 let people = {};          // id -> profile
-let jobs = [], dayNotes = {}, files = {}, online = true, loaded = false; // files: job id -> attachments
+let jobs = [], dayNotes = {}, files = {}, suggestions = [], votes = [], online = true, loaded = false; // files: job id -> attachments
 const dirtyNotes = new Set();
 function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch (e) { return {}; } }
 function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) { } }
@@ -779,15 +792,18 @@ async function allRows(make) {
 }
 const DB = {
   async loadAll() {
-    const [j, pr, n, pp, fl, iv] = await Promise.all([
+    const [j, pr, n, pp, fl, iv, sg, sv] = await Promise.all([
       allRows(() => sb.from("jobs").select("*").order("id")),
       seesPrices() ? allRows(() => sb.from("job_prices").select("job_id,price").order("job_id")) : Promise.resolve({ data: [] }),
       sb.from("day_notes").select("day,note"),
       sb.from("profiles").select("id,email,full_name,role,active"),
       seesPrices() ? allRows(() => sb.from("job_files").select("id,job_id,path,name,size,mime,uploaded_at,uploaded_by").order("uploaded_at", { ascending: true })) : Promise.resolve({ data: [] }),
-      seesPrices() ? allRows(() => sb.from("job_invoices").select("job_id,invoice_no,invoiced_on").order("job_id")) : Promise.resolve({ data: [] })
+      seesPrices() ? allRows(() => sb.from("job_invoices").select("job_id,invoice_no,invoiced_on").order("job_id")) : Promise.resolve({ data: [] }),
+      allRows(() => sb.from("suggestions").select("id,body,status,admin_note,created_at,created_by").order("created_at")),
+      allRows(() => sb.from("suggestion_votes").select("suggestion_id,user_id").order("suggestion_id"))
     ]);
-    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error; if (err) throw err;
+    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error || sg.error || sv.error; if (err) throw err;
+    suggestions = sg.data; votes = sv.data;
     const invs = {}; for (const r of iv.data) invs[r.job_id] = r;
     files = {}; for (const f of fl.data) (files[f.job_id] = files[f.job_id] || []).push(f);
     const prices = {}; for (const r of pr.data) prices[r.job_id] = r;
@@ -904,6 +920,8 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "day_notes" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_files" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_invoices" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "suggestions" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "suggestion_votes" }, reloadSoon)
     .subscribe(status => { if (status === "SUBSCRIBED") { setOnline(true); reloadSoon(); } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setOnline(false); });
 }
 
@@ -1208,6 +1226,51 @@ function printDaySheet(day) {
   window.print();
 }
 
+/* ---------- Suggestions ---------- */
+const SUG_STATUS = { new: "New", planned: "Planned", done: "Done", declined: "Not doing" };
+let sugDraft = "", sugEdit = null;
+function renderSuggestions() {
+  const f = ui.sugFilter || "open", count = id => votes.filter(v => v.suggestion_id === id).length, mine = id => votes.some(v => v.suggestion_id === id && v.user_id === me.id);
+  const list = suggestions.filter(x => f === "all" || (f === "open" ? x.status === "new" || x.status === "planned" : x.status === f))
+    .sort((a, b) => count(b.id) - count(a.id) || (a.created_at < b.created_at ? 1 : -1));
+  $("#main").innerHTML = '<div class="toolbar"><h2>Suggestions</h2><span style="color:var(--muted)">Ideas and problems with the tracker. Vote 👍 for the ones you want most.</span><div class="spacer"></div>' +
+    '<select id="sugFilter" aria-label="Show">' + [["open", "New + planned"], ["done", "Done"], ["declined", "Not doing"], ["all", "All"]].map(([v, l]) => '<option value="' + v + '"' + (f === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select></div>' +
+    '<div class="sug-new"><textarea id="sugText" maxlength="2000" placeholder="Your suggestion…" aria-label="Your suggestion">' + esc(sugDraft) + '</textarea><button class="primary" id="sugPost">Post</button></div>' +
+    (list.length ? list.map(x => {
+      const own = x.created_by === me.id, can = own || isAdmin();
+      return '<div class="sug" data-sid="' + esc(x.id) + '"><button type="button" class="vote' + (mine(x.id) ? ' mine' : '') + '" data-vote title="' + (mine(x.id) ? 'Remove my vote' : 'Vote for this') + '">👍<b>' + count(x.id) + '</b></button><div style="flex:1;min-width:0">' +
+        (sugEdit === x.id ? '<textarea data-edit maxlength="2000">' + esc(x.body) + '</textarea><div class="m"><button type="button" class="primary" data-save>Save</button><button type="button" data-cancel>Cancel</button></div>'
+          : '<div class="b">' + esc(x.body) + '</div>') +
+        (x.admin_note ? '<div class="reply"><b>Reply:</b> ' + esc(x.admin_note) + '</div>' : '') +
+        '<div class="m"><span class="pill sp-' + x.status + '">' + SUG_STATUS[x.status] + '</span><span>' + esc(personName(x.created_by)) + ' · ' + esc(new Date(x.created_at).toLocaleDateString()) + '</span>' +
+        (can && sugEdit !== x.id ? (own ? '<a href="#" data-editbtn>Edit</a>' : '') + '<a href="#" data-del>Delete</a>' : '') +
+        (isAdmin() ? '<select data-status aria-label="Status">' + Object.entries(SUG_STATUS).map(([v, l]) => '<option value="' + v + '"' + (x.status === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select><input data-note maxlength="1000" placeholder="Reply…" value="' + esc(x.admin_note) + '" style="min-width:220px">' : '') +
+        '</div></div></div>';
+    }).join("") : '<div class="empty">No suggestions here yet.</div>');
+  $("#sugFilter").onchange = e => { ui.sugFilter = e.target.value; saveUi(); render(); };
+  $("#sugText").oninput = e => { sugDraft = e.target.value; };
+  $("#sugPost").onclick = async () => {
+    const body = $("#sugText").value.trim(); if (!body) { toast("Write your suggestion first"); return; }
+    const r = await sb.from("suggestions").insert({ body }).select(); if (r.error) { fail("Not posted", r.error); return; }
+    sugDraft = ""; toast("Thanks, posted"); if (f !== "open" && f !== "all") ui.sugFilter = "open"; await reload();
+  };
+  $("#main").querySelectorAll(".sug").forEach(el => {
+    const id = el.dataset.sid, x = suggestions.find(s => s.id === id);
+    el.querySelector("[data-vote]").onclick = async () => {
+      const r = mine(id) ? await sb.from("suggestion_votes").delete().eq("suggestion_id", id).eq("user_id", me.id) : await sb.from("suggestion_votes").insert({ suggestion_id: id, user_id: me.id });
+      if (r.error) fail("Vote not saved", r.error); else await reload();
+    };
+    const save = async patch => { const r = await sb.from("suggestions").update(patch).eq("id", id).select(); if (r.error) fail("Not saved", r.error); else { sugEdit = null; await reload(); } };
+    const q = s => el.querySelector(s);
+    if (q("[data-editbtn]")) q("[data-editbtn]").onclick = e => { e.preventDefault(); sugEdit = id; render(); };
+    if (q("[data-save]")) q("[data-save]").onclick = () => { const b = q("[data-edit]").value.trim(); if (b) save({ body: b }); };
+    if (q("[data-cancel]")) q("[data-cancel]").onclick = () => { sugEdit = null; render(); };
+    if (q("[data-del]")) q("[data-del]").onclick = async e => { e.preventDefault(); if (!confirm("Delete this suggestion?")) return; const r = await sb.from("suggestions").delete().eq("id", id); if (r.error) fail("Not deleted", r.error); else await reload(); };
+    if (q("[data-status]")) q("[data-status]").onchange = e => save({ status: e.target.value });
+    if (q("[data-note]")) q("[data-note]").onchange = e => save({ admin_note: e.target.value.trim().slice(0, 1000) });
+  });
+}
+
 const invSel = new Set(); let invLast = null, invDraft = "";
 function renderInvoicing() {
   const q = $("#search").value, f = ui.fInv, k = ui.invSort, dir = ui.invSortDir;
@@ -1301,13 +1364,14 @@ function render() {
   pendingRender = false;
   if (!me || !loaded) return;
   $("#navUsers").hidden = !isAdmin();
+  { const nNew = suggestions.filter(x => x.status === "new").length; $("#navSug").innerHTML = "💡 Suggestions" + (nNew ? '<span class="navbadge" title="New suggestions">' + nNew + '</span>' : ""); }
   document.querySelectorAll(".admin-only").forEach(e => e.hidden = !isAdmin());
   document.querySelectorAll(".price-only").forEach(e => e.hidden = !seesPrices());
   if (ui.view === "users" && !isAdmin()) ui.view = "board";
   if (ui.view === "invoicing" && !seesPrices()) ui.view = "board";
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === ui.view));
   $("#panel").classList.toggle("hidden", !ui.panel);
-  ({ all: renderAll, week: renderWeek, board: renderBoard, projects: renderProjects, users: renderUsers, invoicing: renderInvoicing }[ui.view] || renderBoard)();
+  ({ all: renderAll, week: renderWeek, board: renderBoard, projects: renderProjects, users: renderUsers, invoicing: renderInvoicing, suggestions: renderSuggestions }[ui.view] || renderBoard)();
   renderSide();
   refreshDatalists();
   if ($("#dlg").open) renderFiles();
@@ -1529,7 +1593,7 @@ document.addEventListener("click", e => {
   const card = e.target.closest(".card,tr.row"); if (card && card.dataset.id) { openEditor(card.dataset.id); return; }
   if (!e.target.closest(".menu")) $("#menuList").classList.remove("open");
 });
-$("#nav").onclick = e => { const v = e.target.dataset.view; if (v) { ui.view = v; saveUi(); render(); } };
+$("#nav").onclick = e => { const b = e.target.closest("[data-view]"), v = b && b.dataset.view; if (v) { ui.view = v; saveUi(); render(); } };
 $("#btnPanel").onclick = () => { ui.panel = !ui.panel; saveUi(); render(); };
 $("#btnNew").onclick = () => openEditor(null);
 $("#search").addEventListener("input", () => render());
