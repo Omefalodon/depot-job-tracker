@@ -306,6 +306,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
       <button type="submit" class="primary" id="btnSave">Save</button>
       <button type="button" data-close>Cancel</button>
       <div class="spacer"></div>
+      <button type="button" id="btnUnslot" title="This load won't happen on this day: the container goes back to the project's list and the day keeps an empty planned load">Put back in project list</button>
       <button type="button" class="danger" id="btnDelete">Delete</button>
     </div>
   </form>
@@ -624,6 +625,11 @@ const DJ = (() => {
     for (const [k] of FIELDS) if (k !== "notes" && k !== "price" && !String(out[k] || "").trim() && String(slot[k] || "").trim()) out[k] = slot[k];
     return cleanJob(Object.assign(out, { id: unit.id, created: unit.created, updated: unit.updated, createdBy: unit.createdBy, updatedBy: unit.updatedBy, checklist: unit.checklist.concat(slot.checklist) }));
   }
+  // The reverse: a load that won't happen goes back to the project's list (no date, Open) and its day gets an empty slot again
+  function unfillSlot(job) {
+    return { unit: cleanJob(Object.assign({}, job, { date: "", time: "", status: "open" })),
+      slot: cleanJob({ project: job.project, client: job.client, cargoType: job.cargoType, transporter: job.transporter, date: job.date, time: job.time, status: "scheduled", notes: "Planned load", slot: true }) };
+  }
 
   /* ---- Minimal .xlsx writer: stored (uncompressed) ZIP, inline strings. No libraries, no network. ---- */
   const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -762,7 +768,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot };
 })();
 
 /* ================= Supabase ================= */
@@ -1439,6 +1445,7 @@ function openEditor(id, preset) {
   $("#jobForm").classList.toggle("slotmode", !!(j && j.slot));
   renderSlotBox(j && j.slot ? j : null, "");
   $("#btnDelete").hidden = !j;
+  $("#btnUnslot").hidden = !(j && !j.slot && j.project && j.date && j.status !== "done");
   const base = j || Object.assign({ status: "open", date: ui.view === "board" ? ui.boardDate : "", project: ui.view === "projects" ? ui.project : "" }, preset || {});
   if (!j && preset && preset.date) base.status = "scheduled";
   for (const [k] of DJ.FIELDS) $("#f_" + k).value = base[k] == null ? "" : base[k];
@@ -1591,6 +1598,18 @@ $("#btnDelete").onclick = async () => {
   try { await DB.deleteJob(editing); $("#dlg").close(); toast("Deleted"); await reload(); } catch (err) { fail("Not deleted", err); }
 };
 
+$("#btnUnslot").onclick = async () => {
+  const j = jobs.find(x => x.id === editing); if (!j) return;
+  if (!confirm(DJ.unitLabel(j) + " goes back to project “" + j.project + "” with no date, status Open.\n\n" + fmtDate(j.date) + " keeps an empty planned load, so you can pick another container for it (or delete that slot if the load is cancelled).")) return;
+  const { unit, slot } = DJ.unfillSlot(j);
+  try {
+    const r = await DB.saveJob(unit, j.updated);
+    if (r.conflict) { toast("Someone just changed this job, try again"); await reload(); return; }
+    await DB.importJobs([slot]);
+    $("#dlg").close(); toast(DJ.unitLabel(unit) + " is back in the project list"); await reload();
+  } catch (err) { fail("Not changed", err); await reload(); }
+};
+
 /* ================= Wiring ================= */
 document.addEventListener("click", e => {
   const card = e.target.closest(".card,tr.row"); if (card && card.dataset.id) { openEditor(card.dataset.id); return; }
@@ -1698,6 +1717,9 @@ function selfTest() {
   ok("slot candidates", DJ.slotCandidates([unit, slot, DJ.cleanJob({ project: "P", status: "done" }), DJ.cleanJob({ project: "Q" })], slot).map(j => j.id).join() === "u1");
   const filled = DJ.fillSlot(slot, unit);
   ok("fill slot", filled.id === "u1" && filled.date === "2026-10-27" && filled.time === "10:00" && filled.truckPlate === "IKX1" && filled.weight === "500" && !filled.slot && filled.notes === "" && DJ.title(slot) === "Planned load · P");
+  const un = DJ.unfillSlot(filled);
+  ok("put back in project list", un.unit.id === "u1" && un.unit.date === "" && un.unit.status === "open" && !un.unit.slot && un.unit.shippingContainer === "MSCU1234566" &&
+    un.slot.slot && un.slot.id !== "u1" && un.slot.date === "2026-10-27" && un.slot.time === "10:00" && un.slot.project === "P" && un.slot.shippingContainer === "" && DJ.slotCandidates([un.unit], un.slot).length === 1);
   ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&
     DJ.parseImport([["Client", "ΑΠΟΣΤΟΛΈΑΣ", "Παραλήπτης", "Date"], ["C", "Snd", "Rcv", ""]], []).jobs[0].job.receiver === "Rcv" && DJ.applyFilters([DJ.cleanJob({ sender: "X" }), DJ.cleanJob({})], { sender: "X" }).length === 1);
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");

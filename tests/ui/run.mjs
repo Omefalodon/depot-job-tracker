@@ -192,7 +192,11 @@ const plannedBefore = db.jobs.filter(j => j.is_slot).length;
 await G.click('#slotUse'); await G.waitForTimeout(900);
 const moved = db.jobs.find(j => j.id === unitJob.id);
 log('filled:', moved.job_date === slotJob.job_date, moved.status, '| slots left:', db.jobs.filter(j => j.is_slot).length, "of", plannedBefore, '| editor now on job:', await G.textContent('#dlgTitle'));
-await G.click('#jobForm [data-close]');
+// Undo: the load won't happen that day, so put the container back in the project list
+log('put-back button shown:', await G.isVisible('#btnUnslot'));
+await G.click('#btnUnslot'); await G.waitForTimeout(900);
+const back = db.jobs.find(j => j.id === unitJob.id);
+log('put back:', back.job_date === null || back.job_date === '' ? 'no date' : back.job_date, back.status, '| slots now:', db.jobs.filter(j => j.is_slot).length, 'of', plannedBefore, '| new slot on day:', db.jobs.some(j => j.is_slot && j.job_date === slotJob.job_date && j.id !== slotJob.id && !j.notes.includes(' of ')), '| dialog open:', await G.isVisible('#dlg'));
 // Week: drag from the side panel into a slot, and add a second job to a slot that already has one
 await G.click('nav [data-view=week]'); await G.click('#wToday'); await G.waitForTimeout(200);
 const sideJob = await G.locator('#sideList .card[draggable]').first().getAttribute('data-id');
