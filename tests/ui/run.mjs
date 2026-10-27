@@ -8,10 +8,10 @@ const db = { profiles: [
   { id: "u-george", email: "george@test", full_name: "George", role: "admin", active: true },
   { id: "u-maria", email: "maria@test", full_name: "Maria", role: "office", active: true },
   { id: "u-new", email: "new@test", full_name: "", role: "office", active: false }],
-  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [], suggestions: [], suggestion_votes: [] };
+  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [], suggestions: [], suggestion_votes: [], project_notes: [] };
 const objects = {}; // storage bucket job-files: path -> {size, contentType}
 const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'text/plain', 'application/vnd.ms-outlook'];
-const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id", job_invoices: "job_id" };
+const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id", job_invoices: "job_id", project_notes: "project" };
 const sessions = new Map(); const pages = [];
 let seq = 0; const now = () => new Date(Date.now() + (seq++)).toISOString();
 function role(uid) { const p = db.profiles.find(p => p.id === uid); return p && p.active ? p.role : null; }
@@ -213,6 +213,23 @@ await G.click('#navSug .navbadge'); await G.locator('.sug [data-vote]').first().
 await G.selectOption('.sug [data-status]', 'planned'); await G.waitForTimeout(500); await G.fill('.sug [data-note]', 'Next week'); await G.locator('.sug [data-note]').press('Tab'); await G.waitForTimeout(600);
 await M.waitForTimeout(400); await M.locator('.sug [data-vote]').first().click(); await M.waitForTimeout(600);
 log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.admin_note])), '| votes:', db.suggestion_votes.length, '| maria sees reply:', (await M.textContent('.sug')).includes('Next week'), '| maria has status menu:', await M.locator('.sug [data-status]').count()); await G.screenshot({ path: new URL('./g-sug.png', import.meta.url).pathname });
+// Projects: notes, edit in table, cancel the whole project and reopen it
+const projName = slotJob.project;
+await G.click('nav [data-view=projects]'); await G.locator('.plist [data-p="' + projName + '"]').click(); await G.waitForTimeout(200);
+await G.fill('#projNote', 'Customs papers via Nikos'); await G.locator('#projNote').press('Tab'); await G.waitForTimeout(900);
+await M.click('nav [data-view=projects]'); await M.locator('.plist [data-p="' + projName + '"]').click(); await M.waitForTimeout(300);
+log('project note:', JSON.stringify(db.project_notes.map(n => [n.project, n.note])), '| maria sees:', await M.inputValue('#projNote'));
+await G.check('#edToggle'); await G.waitForTimeout(200);
+const edRow = G.locator('table.editing tr.row').filter({ has: G.locator('[data-ek=client]') }).first(); const edId = await edRow.getAttribute('data-id');
+await edRow.locator('[data-ek=client]').fill('Edited inline'); await edRow.locator('[data-ek=client]').press('Tab'); await G.waitForTimeout(800);
+log('inline edit:', db.jobs.find(j => j.id === edId).client, '| editor opened:', await G.isVisible('#dlg'), '| still editing:', await G.locator('table.editing').count());
+await G.uncheck('#edToggle');
+const projJobs = () => db.jobs.filter(j => j.project === projName);
+const doneBefore = projJobs().filter(j => j.status === 'done').length;
+await G.click('#cancelProj'); await G.waitForTimeout(900);
+log('cancel project:', (G._lastDialog || '').split('\n')[0], '| statuses:', JSON.stringify([...new Set(projJobs().map(j => j.status))]), '| slots left:', projJobs().filter(j => j.is_slot).length, '| done kept:', projJobs().filter(j => j.status === 'done').length === doneBefore, '| side panel shows them:', await G.locator('#sideList .card').filter({ hasText: projName }).count());
+await G.click('#reopenProj'); await G.waitForTimeout(900);
+log('reopen:', JSON.stringify([...new Set(projJobs().map(j => j.status))]));
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });

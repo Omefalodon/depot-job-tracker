@@ -31,6 +31,12 @@ transporter, cargo, dates, invoice number); click rows to select (Shift+click fo
 number and press *Set on selected*. Office + admin only, like prices; every change is in the job's
 history.
 
+## Projects
+
+- **Notes:** one free-text note per project (table `project_notes`), seen and edited by all users.
+- **Cancel project:** every unfinished job of the project gets status Cancelled and its empty planned loads are removed; Done jobs stay. Cancelled jobs drop off Week, Today, the side panel and the day sheet. **Reopen cancelled** sets them back to Scheduled (with a date) or Open.
+- **✎ Edit in table** (All jobs and Projects): cells become inputs and each one saves when you leave it, with the same conflict check as the editor. Planned loads only allow date, time and status there.
+
 ## Suggestions
 💡 Suggestions (top bar) is a board for ideas about the tracker: everyone approved can post and vote
 👍 once per idea; authors edit or delete their own; only an admin sets the status (New / Planned /

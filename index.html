@@ -59,9 +59,16 @@ main{flex:1;overflow:auto;padding:14px;min-width:0}
 .card .m{color:var(--muted);font-size:12px}
 .card .prog{font-size:11px;color:var(--muted)}
 .st-open{border-left-color:var(--s-open)} .st-scheduled{border-left-color:var(--s-scheduled)}
-.st-in-progress{border-left-color:var(--s-progress)} .st-done{border-left-color:var(--s-done)}
+.st-in-progress{border-left-color:var(--s-progress)} .st-done{border-left-color:var(--s-done)} .st-cancelled{border-left-color:var(--muted);opacity:.7}
 .pill{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor;white-space:nowrap;font-weight:600}
-.p-open{color:var(--s-open)} .p-scheduled{color:var(--s-scheduled)} .p-in-progress{color:var(--s-progress)} .p-done{color:var(--s-done)}
+.p-open{color:var(--s-open)} .p-scheduled{color:var(--s-scheduled)} .p-in-progress{color:var(--s-progress)} .p-done{color:var(--s-done)} .p-cancelled{color:var(--muted)}
+tr.row.cancelled td{color:var(--muted)}
+table.editing td{padding:2px}
+table.editing input,table.editing select{width:100%;min-width:70px;padding:3px 4px;font-size:12px}
+table.editing input[type=date]{min-width:120px} table.editing input[type=time]{min-width:80px}
+.edtoggle{display:flex;gap:6px;align-items:center;margin:0;font-size:13px;color:var(--text);cursor:pointer}
+.edtoggle input{width:auto}
+.projnote{width:100%;min-height:70px;margin:0 0 10px;font:inherit;resize:vertical}
 .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .toolbar h2{font-size:18px;margin:0 8px 0 0}
 .toolbar select,.toolbar input{width:auto}
@@ -285,7 +292,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
         <div class="slotkeep"><label for="f_status">Status</label>
           <select id="f_status" name="status">
             <option value="open">Open</option><option value="scheduled">Scheduled</option>
-            <option value="in-progress">In progress</option><option value="done">Done</option>
+            <option value="in-progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
           </select></div>
         <div class="wide"><label for="f_notes">Free text</label><textarea id="f_notes" name="notes" rows="3" maxlength="4000"></textarea></div>
         <div class="wide checks">
@@ -348,8 +355,9 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
 "use strict";
 /* ================= Pure logic (no DOM) — covered by the self-test ================= */
 const DJ = (() => {
-  const STATUSES = ["open", "scheduled", "in-progress", "done"];
-  const STATUS_LABEL = { "open": "Open", "scheduled": "Scheduled", "in-progress": "In progress", "done": "Done" };
+  const STATUSES = ["open", "scheduled", "in-progress", "done", "cancelled"];
+  const STATUS_LABEL = { "open": "Open", "scheduled": "Scheduled", "in-progress": "In progress", "done": "Done", "cancelled": "Cancelled" };
+  const closed = j => j.status === "done" || j.status === "cancelled"; // finished one way or the other
   const FIELDS = [
     ["client", "Client"], ["sender", "Sender (Αποστολέας)"], ["receiver", "Receiver (Παραλήπτης)"], ["shippingContainer", "Shipping container"], ["hctContainer", "HCT container"],
     ["truckPlate", "Truck plate"], ["transporter", "Transporter"], ["cargoType", "Cargo type"],
@@ -417,7 +425,7 @@ const DJ = (() => {
 
   // Day sheet for the depot: the day's jobs that aren't done, by time, only what the crew needs (never prices).
   function daySheetRows(jobs, day) {
-    return jobs.filter(j => j.date === day && j.status !== "done")
+    return jobs.filter(j => j.date === day && !closed(j))
       .sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : (a.time || "99") > (b.time || "99") ? 1 : 0)
       .map(j => ({ time: j.time || "", client: j.client || "", shippingContainer: j.shippingContainer || "", hctContainer: j.hctContainer || "", cargoType: j.cargoType || "", truckPlate: j.truckPlate || "" }));
   }
@@ -428,7 +436,7 @@ const DJ = (() => {
     f = f || {};
     const is = (v, want) => !want || (want === NONE ? !v : v === want);
     return list.filter(j =>
-      (!f.status || f.status === "all" || (f.status === "active" ? j.status !== "done" : j.status === f.status)) &&
+      (!f.status || f.status === "all" || (f.status === "active" ? !closed(j) : j.status === f.status)) &&
       is(j.client, f.client) && is(j.sender, f.sender) && is(j.receiver, f.receiver) && is(j.project, f.project) && is(j.transporter, f.transporter) && is(j.cargoType, f.cargoType) &&
       (!f.from || (j.date && j.date >= f.from)) && (!f.to || (j.date && j.date <= f.to)) &&
       (!f.invoiced || f.invoiced === "all" || (f.invoiced === "no" ? !j.invoiceNo : !!j.invoiceNo)) &&
@@ -617,7 +625,7 @@ const DJ = (() => {
 
   function title(j) { return j.slot ? "Planned load" + (j.project ? " · " + j.project : "") : j.shippingContainer || j.hctContainer || j.ref || j.client || "(untitled job)"; }
   // Jobs of the slot's project that can fill it: real (not planned) jobs that aren't done yet
-  function slotCandidates(jobs, slot) { return jobs.filter(j => !j.slot && j.status !== "done" && j.project === slot.project).sort((a, b) => (a.date ? 1 : 0) - (b.date ? 1 : 0) || String(a.ref || a.shippingContainer).localeCompare(String(b.ref || b.shippingContainer), undefined, { numeric: true })); }
+  function slotCandidates(jobs, slot) { return jobs.filter(j => !j.slot && !closed(j) && j.project === slot.project).sort((a, b) => (a.date ? 1 : 0) - (b.date ? 1 : 0) || String(a.ref || a.shippingContainer).localeCompare(String(b.ref || b.shippingContainer), undefined, { numeric: true })); }
   function unitLabel(j) { return [j.shippingContainer, j.hctContainer && "HCT " + j.hctContainer, j.ref && "Ref " + j.ref].filter(Boolean).join(" · ") || j.client || "(job without container or ref)"; }
   // The real job takes the slot's day, time and status; anything typed on the slot fills its empty fields
   function fillSlot(slot, unit) {
@@ -625,6 +633,12 @@ const DJ = (() => {
     for (const [k] of FIELDS) if (k !== "notes" && k !== "price" && !String(out[k] || "").trim() && String(slot[k] || "").trim()) out[k] = slot[k];
     return cleanJob(Object.assign(out, { id: unit.id, created: unit.created, updated: unit.updated, createdBy: unit.createdBy, updatedBy: unit.updatedBy, checklist: unit.checklist.concat(slot.checklist) }));
   }
+  // Cancel a whole project: unfinished jobs become Cancelled, its empty planned loads go; Reopen undoes the first part
+  function cancelPlan(jobs, project) {
+    const mine = jobs.filter(j => j.project.trim() === project && !closed(j));
+    return { cancel: mine.filter(j => !j.slot).map(j => j.id), drop: mine.filter(j => j.slot).map(j => j.id) };
+  }
+  function reopenStatus(j) { return j.date ? "scheduled" : "open"; }
   // The reverse: a load that won't happen goes back to the project's list (no date, Open) and its day gets an empty slot again
   function unfillSlot(job) {
     return { unit: cleanJob(Object.assign({}, job, { date: "", time: "", status: "open" })),
@@ -768,7 +782,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot, closed, cancelPlan, reopenStatus };
 })();
 
 /* ================= Supabase ================= */
@@ -779,7 +793,7 @@ if (!window.supabase) { document.body.innerHTML = "<p style=\"padding:20px\">The
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 let me = null;            // my profile row
 let people = {};          // id -> profile
-let jobs = [], dayNotes = {}, files = {}, suggestions = [], votes = [], online = true, loaded = false; // files: job id -> attachments
+let jobs = [], dayNotes = {}, projectNotes = {}, files = {}, suggestions = [], votes = [], online = true, loaded = false; // files: job id -> attachments
 const dirtyNotes = new Set();
 function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch (e) { return {}; } }
 function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) { } }
@@ -801,7 +815,7 @@ async function allRows(make) {
 }
 const DB = {
   async loadAll() {
-    const [j, pr, n, pp, fl, iv, sg, sv] = await Promise.all([
+    const [j, pr, n, pp, fl, iv, sg, sv, pn] = await Promise.all([
       allRows(() => sb.from("jobs").select("*").order("id")),
       seesPrices() ? allRows(() => sb.from("job_prices").select("job_id,price").order("job_id")) : Promise.resolve({ data: [] }),
       sb.from("day_notes").select("day,note"),
@@ -809,9 +823,13 @@ const DB = {
       seesPrices() ? allRows(() => sb.from("job_files").select("id,job_id,path,name,size,mime,uploaded_at,uploaded_by").order("uploaded_at", { ascending: true })) : Promise.resolve({ data: [] }),
       seesPrices() ? allRows(() => sb.from("job_invoices").select("job_id,invoice_no,invoiced_on").order("job_id")) : Promise.resolve({ data: [] }),
       allRows(() => sb.from("suggestions").select("id,body,status,admin_note,created_at,created_by").order("created_at")),
-      allRows(() => sb.from("suggestion_votes").select("suggestion_id,user_id").order("suggestion_id"))
+      allRows(() => sb.from("suggestion_votes").select("suggestion_id,user_id").order("suggestion_id")),
+      sb.from("project_notes").select("project,note")
     ]);
-    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error || sg.error || sv.error; if (err) throw err;
+    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error || sg.error || sv.error || pn.error; if (err) throw err;
+    const keepP = {}; for (const p of dirtyProjNotes) keepP[p] = projectNotes[p];
+    projectNotes = {}; for (const r of pn.data) projectNotes[r.project] = r.note;
+    Object.assign(projectNotes, keepP);
     suggestions = sg.data; votes = sv.data;
     const invs = {}; for (const r of iv.data) invs[r.job_id] = r;
     files = {}; for (const f of fl.data) (files[f.job_id] = files[f.job_id] || []).push(f);
@@ -896,6 +914,13 @@ const DB = {
     const s = await sb.storage.from("job-files").remove([f.path]); if (s.error) throw s.error;
     const r = await sb.from("job_files").delete().eq("id", f.id); if (r.error) throw r.error;
   },
+  async setStatus(ids, status) {
+    for (let i = 0; i < ids.length; i += 100) { const r = await sb.from("jobs").update({ status }).in("id", ids.slice(i, i + 100)); if (r.error) throw r.error; }
+  },
+  async saveProjectNote(project, text) {
+    const r = text.trim() ? await sb.from("project_notes").upsert({ project, note: text.slice(0, 8000) }) : await sb.from("project_notes").delete().eq("project", project);
+    if (r.error) throw r.error;
+  },
   async saveNote(day, text) {
     const r = text.trim() ? await sb.from("day_notes").upsert({ day, note: text.slice(0, 4000) }) : await sb.from("day_notes").delete().eq("day", day);
     if (r.error) throw r.error;
@@ -915,9 +940,11 @@ function reloadSoon() { clearTimeout(reloadT); reloadT = setTimeout(reload, 350)
 let pendingRender = false;
 function renderSoon() {
   // don't yank a note box out from under someone typing in it
-  if (document.activeElement && document.activeElement.classList.contains("daynote")) { pendingRender = true; return; }
+  if (typing()) { pendingRender = true; return; }
   render();
 }
+function typing() { const a = document.activeElement; return !!a && (a.classList.contains("daynote") || a.classList.contains("projnote") || a.hasAttribute("data-ek")); }
+document.addEventListener("focusout", e => { if (pendingRender && e.target.matches && e.target.matches(".projnote,[data-ek]")) setTimeout(() => { if (pendingRender && !typing()) render(); }, 150); });
 function setOnline(v) { online = v; showBanner(); }
 
 let channel = null;
@@ -927,6 +954,7 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "jobs" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_prices" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "day_notes" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "project_notes" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_files" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_invoices" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "suggestions" }, reloadSoon)
@@ -1039,7 +1067,7 @@ function wxHtml(day) {
 /* ================= Side panel ================= */
 function renderSide() {
   const q = $("#search").value;
-  const list = jobs.filter(j => j.status !== "done" && DJ.matches(j, q)).sort(byDate);
+  const list = jobs.filter(j => !DJ.closed(j) && DJ.matches(j, q)).sort(byDate);
   $("#sideCount").textContent = list.length + " open job" + (list.length === 1 ? "" : "s") + (q ? " matching" : "");
   const drag = ui.view === "week" || ui.view === "board"; // side cards can be dropped on Week slots and Today columns
   $("#sideList").innerHTML = list.length ? list.map(j => cardHtml(j, q, drag)).join("") : '<div class="empty">' + (q ? "No open jobs match." : "No open jobs.") + '</div>';
@@ -1055,7 +1083,7 @@ function filterBar(f, withInvoice) {
   };
   const st = f.status || "all";
   return '<div class="filters"><select data-f="status" aria-label="Status"' + (st !== "all" ? ' class="on"' : '') + '>' +
-    [["all", "Status: all"], ["active", "Not done"]].concat(DJ.STATUSES.map(s => [s, DJ.STATUS_LABEL[s]])).map(([v, l]) => '<option value="' + v + '"' + (st === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' +
+    [["all", "Status: all"], ["active", "Still to do"]].concat(DJ.STATUSES.map(s => [s, DJ.STATUS_LABEL[s]])).map(([v, l]) => '<option value="' + v + '"' + (st === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' +
     (withInvoice ? '<select data-f="invoiced" aria-label="Invoiced"' + (f.invoiced && f.invoiced !== "all" ? ' class="on"' : '') + '>' + [["all", "Invoiced: all"], ["no", "Not invoiced"], ["yes", "Invoiced"]].map(([v, l]) => '<option value="' + v + '"' + ((f.invoiced || "all") === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' : '') +
     sel("client", "Client") + sel("sender", "Sender") + sel("receiver", "Receiver") + sel("project", "Project") + sel("transporter", "Transporter") + sel("cargoType", "Cargo") +
     '<label class="inl">From <input type="date" data-f="from" value="' + esc(f.from || "") + '"' + (f.from ? ' class="on"' : '') + '></label>' +
@@ -1079,17 +1107,53 @@ function renderAll() {
   const k = ui.sort, dir = ui.sortDir;
   const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
   $("#main").innerHTML =
-    '<div class="toolbar"><h2>All jobs</h2><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div>' +
+    '<div class="toolbar"><h2>All jobs</h2><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle() + '<div class="spacer"></div>' +
     '<button id="tplBtn" title="Excel file with all the job columns, to fill in and import">⬇ Excel template</button><button id="impBtn" title="Create many jobs at once from a filled-in template">⬆ Import from Excel</button><button id="exportAll">Export to Excel</button></div>' +
     filterBar(ui.fAll, false) +
-    (list.length ? '<div class="tablewrap"><table><thead><tr>' + cols.map(([c, l]) => '<th data-sort="' + c + '">' + l + (ui.sort === c ? (dir > 0 ? " ▲" : " ▼") : "") + '</th>').join("") + '<th>☑</th></tr></thead><tbody>' +
-      list.map(j => '<tr class="row" data-id="' + esc(j.id) + '">' + cols.map(([c]) => '<td>' + (c === "status" ? pill(j.status) : c === "date" ? esc(j.date ? fmtDate(j.date) : "—") : (c === "weight" || c === "pieces") && j[c] ? esc(Number(j[c]).toLocaleString()) : c === "price" && j.price !== "" ? esc(Number(j.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : hl(j[c], q)) + '</td>').join("") + '<td>' + progress(j) + '</td></tr>').join("") +
-      '</tbody></table></div>' : '<div class="empty">No jobs here yet. Click “+ New job”, or ⋯ › Load demo data.</div>');
+    (list.length ? jobTable(list, cols, q, true) : '<div class="empty">No jobs here yet. Click “+ New job”, or ⋯ › Load demo data.</div>');
   wireFilters(ui.fAll, { status: "active" });
   $("#tplBtn").onclick = downloadTemplate;
   $("#impBtn").onclick = () => $("#fileImport").click();
   $("#main").querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => { const c = th.dataset.sort; if (ui.sort === c) ui.sortDir *= -1; else { ui.sort = c; ui.sortDir = 1; } saveUi(); render(); });
   $("#exportAll").onclick = () => exportExcel(list, "Depot jobs " + todayStr(), "Jobs");
+  wireTable();
+}
+
+/* ---------- job tables (All jobs, Projects), optionally editable in place ---------- */
+function editToggle() { return '<label class="edtoggle" title="Change jobs straight in the table; each cell saves when you leave it"><input type="checkbox" id="edToggle"' + (ui.tableEdit ? ' checked' : '') + '>✎ Edit in table</label>'; }
+function editCell(j, c) {
+  const a = ' data-ek="' + c + '" data-id="' + esc(j.id) + '" aria-label="' + esc(c) + '"';
+  if (c === "status") return '<select' + a + '>' + DJ.STATUSES.map(s => '<option value="' + s + '"' + (j.status === s ? ' selected' : '') + '>' + DJ.STATUS_LABEL[s] + '</option>').join("") + '</select>';
+  const type = c === "date" ? "date" : c === "time" ? "time" : c === "weight" || c === "pieces" || c === "price" ? "number" : "text";
+  return '<input type="' + type + '"' + a + ' value="' + esc(j[c] == null ? "" : j[c]) + '"' + (type === "number" ? ' min="0" step="' + (c === "price" ? "0.01" : "1") + '"' : type === "text" ? ' maxlength="120"' : '') + '>';
+}
+// Planned loads keep only date, time and status editable here; their container is picked in the job editor
+const editable = (j, c) => c !== "invoiceNo" && (!j.slot || c === "date" || c === "time" || c === "status");
+function jobTable(list, cols, q, sortable) {
+  const ed = !!ui.tableEdit, dir = ui.sortDir;
+  return '<div class="tablewrap"><table' + (ed ? ' class="editing"' : '') + '><thead><tr>' + cols.map(([c, l]) => '<th' + (sortable ? ' data-sort="' + c + '"' : '') + '>' + l + (sortable && ui.sort === c ? (dir > 0 ? " ▲" : " ▼") : "") + '</th>').join("") + '<th>☑</th></tr></thead><tbody>' +
+    list.map(j => '<tr class="row' + (j.status === "cancelled" ? ' cancelled' : '') + '" data-id="' + esc(j.id) + '">' + cols.map(([c]) => '<td>' + (ed && editable(j, c) ? editCell(j, c)
+      : c === "status" ? pill(j.status) : c === "date" ? esc(j.date ? fmtDate(j.date) : "—") : (c === "weight" || c === "pieces") && j[c] ? esc(Number(j[c]).toLocaleString()) : c === "price" && j.price !== "" ? esc(Number(j.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : hl(j[c], q)) + '</td>').join("") +
+      '<td>' + (ed ? '<button type="button" class="ghost" data-openjob title="Open the whole job" aria-label="Open job">✎</button> ' : '') + progress(j) + '</td></tr>').join("") +
+    '</tbody></table></div>';
+}
+function wireTable() {
+  const t = $("#edToggle"); if (t) t.onchange = () => { ui.tableEdit = t.checked; saveUi(); render(); };
+  $("#main").querySelectorAll("[data-ek]").forEach(el => el.addEventListener("change", () => saveCell(el)));
+  $("#main").querySelectorAll("[data-openjob]").forEach(b => b.onclick = () => openEditor(b.closest("tr").dataset.id));
+}
+async function saveCell(el) {
+  const j = jobs.find(x => x.id === el.dataset.id), k = el.dataset.ek; if (!j) return;
+  const next = DJ.cleanJob(Object.assign({}, j, { [k]: el.value }));
+  if (k === "date" && next.date && j.status === "open") next.status = "scheduled";
+  if (next[k] === j[k] && next.status === j.status) { el.value = j[k]; return; }
+  el.disabled = true;
+  try {
+    const r = await DB.saveJob(next, j.updated);
+    if (r.conflict) toast("Someone else just changed this job; showing their version");
+    else { Object.assign(j, next, { updated: r.row.updated_at }); if (k === "shippingContainer" || k === "hctContainer") { const w = DJ.containerWarning(next[k]); if (w) toast(w); } }
+  } catch (err) { fail("Not saved", err); }
+  el.disabled = false; reloadSoon();
 }
 
 const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16]; // slots 08:00–17:00
@@ -1098,8 +1162,8 @@ function renderWeek() {
   const q = $("#search").value, start = ui.weekStart, today = todayStr();
   const days = [...Array(7)].map((_, i) => DJ.addDays(start, i));
   const end = days[6];
-  const inWeek = jobs.filter(j => j.date >= start && j.date <= end && DJ.matches(j, q)).sort(byDate);
-  const undated = jobs.filter(j => !j.date && j.status !== "done" && DJ.matches(j, q));
+  const inWeek = jobs.filter(j => j.date >= start && j.date <= end && j.status !== "cancelled" && DJ.matches(j, q)).sort(byDate);
+  const undated = jobs.filter(j => !j.date && !DJ.closed(j) && DJ.matches(j, q));
   const cell = (d, slot) => '<div class="slot' + (slot ? '' : ' notime') + (d === today ? ' today' : '') + '" data-day="' + d + '" data-time="' + slot + '">' +
     inWeek.filter(j => j.date === d && slotOf(j) === slot).map(j => cardHtml(j, q, true, true)).join("") +
     '<button type="button" class="addslot" title="Add a job ' + esc(fmtDate(d)) + (slot ? ' at ' + slot : '') + '" aria-label="Add a job here">+</button></div>';
@@ -1134,11 +1198,11 @@ function renderWeek() {
 
 function renderBoard() {
   const q = $("#search").value, d = ui.boardDate;
-  const list = jobs.filter(j => j.date === d && DJ.matches(j, q));
+  const list = jobs.filter(j => j.date === d && j.status !== "cancelled" && DJ.matches(j, q));
   $("#main").innerHTML =
     '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button><button id="bPrint" title="Printable list of the jobs to do this day, for the depot (no prices)">🖨 Day sheet</button><button id="bSheetX" title="The same day sheet as an Excel file you can edit">Day sheet (Excel)</button>' +
     '<span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' · drag a card to change its status</span></div>' +
-    '<div class="board">' + DJ.STATUSES.map(s => {
+    '<div class="board">' + DJ.STATUSES.filter(s => s !== "cancelled").map(s => {
       const l = list.filter(j => j.status === s).sort(byDate);
       return '<div class="col" data-status="' + s + '"><h3><span class="p-' + s + '">' + DJ.STATUS_LABEL[s] + '</span><span style="color:var(--muted)">' + l.length + '</span></h3>' + l.map(j => cardHtml(j, q, true)).join("") + '</div>';
     }).join("") + '</div>';
@@ -1158,17 +1222,57 @@ function renderProjects() {
   if (ui.project && !names.includes(ui.project)) ui.project = "";
   const sel = ui.project || names.find(n => n) || (names.length ? "" : null);
   const list = sel === null ? [] : jobs.filter(j => j.project.trim() === sel && DJ.matches(j, q)).sort(byDate);
-  const count = n => jobs.filter(j => j.project.trim() === n && j.status !== "done").length + "/" + jobs.filter(j => j.project.trim() === n).length;
+  const count = n => jobs.filter(j => j.project.trim() === n && !DJ.closed(j)).length + "/" + jobs.filter(j => j.project.trim() === n).length;
+  const plan = sel ? DJ.cancelPlan(jobs, sel) : { cancel: [], drop: [] }, nCancelled = sel ? jobs.filter(j => j.project.trim() === sel && j.status === "cancelled").length : 0;
+  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"], ["ref", "Ref"]];
   $("#main").innerHTML = '<div class="projects"><div class="plist"><div class="toolbar"><h2>Projects</h2><div class="spacer"></div><button id="planBtn" title="Create a number of loads per day for a project, details filled in later">+ Plan loads</button></div>' +
     (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + '"><span>' + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
-    '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span><div class="spacer"></div><button id="exportProj" class="primary">Export to Excel</button></div>' +
-      (list.length ? '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Status</th><th>Client</th><th>Shipping cont.</th><th>HCT cont.</th><th>Truck</th><th>Cargo</th><th>Weight</th><th>Pieces</th><th>Ref</th><th>☑</th></tr></thead><tbody>' +
-        list.map(j => '<tr class="row" data-id="' + esc(j.id) + '"><td>' + esc(j.date ? fmtDate(j.date) + (j.time ? " " + j.time : "") : "—") + '</td><td>' + pill(j.status) + '</td><td>' + hl(j.client, q) + '</td><td>' + hl(j.shippingContainer, q) + '</td><td>' + hl(j.hctContainer, q) + '</td><td>' + hl(j.truckPlate, q) + '</td><td>' + hl(j.cargoType, q) + '</td><td>' + (j.weight ? esc(Number(j.weight).toLocaleString()) : "") + '</td><td>' + (j.pieces ? esc(Number(j.pieces).toLocaleString()) : "") + '</td><td>' + hl(j.ref, q) + '</td><td>' + progress(j) + '</td></tr>').join("") +
-        '</tbody></table></div>' + (list.length ? '<p style="color:var(--muted);font-size:12px">Total weight: ' + list.reduce((a, j) => a + (+j.weight || 0), 0).toLocaleString() + ' kg · Total pieces: ' + list.reduce((a, j) => a + (+j.pieces || 0), 0).toLocaleString() + (seesPrices() ? ' · Total price: € ' + list.reduce((a, j) => a + (+j.price || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '') + '</p>' : '') : '<div class="empty">No jobs match.</div>') : '') + '</div></div>';
+    '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle() + '<div class="spacer"></div>' +
+      (sel && plan.cancel.length + plan.drop.length ? '<button id="cancelProj" class="danger" title="Mark every unfinished job of this project Cancelled and remove its empty planned loads">Cancel project</button>' : '') +
+      (nCancelled ? '<button id="reopenProj" title="Set the cancelled jobs of this project back to Open / Scheduled">Reopen cancelled (' + nCancelled + ')</button>' : '') +
+      '<button id="exportProj" class="primary">Export to Excel</button></div>' +
+      (sel ? '<textarea class="projnote" id="projNote" maxlength="8000" placeholder="Notes for this project…" aria-label="Notes for project ' + esc(sel) + '">' + esc(projectNotes[sel] || "") + '</textarea>' : '') +
+      (list.length ? jobTable(list, cols, q, false) + (list.length ? '<p style="color:var(--muted);font-size:12px">Total weight: ' + list.reduce((a, j) => a + (+j.weight || 0), 0).toLocaleString() + ' kg · Total pieces: ' + list.reduce((a, j) => a + (+j.pieces || 0), 0).toLocaleString() + (seesPrices() ? ' · Total price: € ' + list.reduce((a, j) => a + (+j.price || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '') + '</p>' : '') : '<div class="empty">No jobs match.</div>') : '') + '</div></div>';
   $("#main").querySelectorAll("[data-p]").forEach(b => b.onclick = () => { ui.project = b.dataset.p; saveUi(); render(); });
   const ex = $("#exportProj"); if (ex) ex.onclick = () => exportExcel(list, (sel || "No project") + " " + todayStr(), sel || "No project");
   $("#planBtn").onclick = () => openPlan(sel || "");
+  wireTable();
+  const pn = $("#projNote");
+  if (pn) { pn.addEventListener("input", () => { if (pn.value.trim()) projectNotes[sel] = pn.value; else delete projectNotes[sel]; dirtyProjNotes.add(sel); saveProjNotes(); }); pn.addEventListener("blur", flushProjNotes); }
+  const cp = $("#cancelProj"); if (cp) cp.onclick = () => cancelProject(sel, plan);
+  const rp = $("#reopenProj"); if (rp) rp.onclick = () => reopenProject(sel);
 }
+async function cancelProject(name, plan) {
+  if (!confirm("Cancel project “" + name + "”?\n\n" + plan.cancel.length + " unfinished job" + (plan.cancel.length === 1 ? "" : "s") + " will be marked Cancelled (they stay in the list and can be reopened)" +
+    (plan.drop.length ? "\n" + plan.drop.length + " empty planned load" + (plan.drop.length === 1 ? "" : "s") + " will be removed" : "") + ".\nDone jobs stay as they are.")) return;
+  try {
+    await DB.setStatus(plan.cancel, "cancelled");
+    for (const id of plan.drop) await DB.deleteJob(id);
+    toast("Project “" + name + "” cancelled");
+  } catch (err) { fail("Not all jobs were cancelled", err); }
+  await reload();
+}
+async function reopenProject(name) {
+  const list = jobs.filter(j => j.project.trim() === name && j.status === "cancelled");
+  if (!list.length || !confirm("Reopen " + list.length + " cancelled job" + (list.length === 1 ? "" : "s") + " of “" + name + "”? Jobs with a date become Scheduled, the rest Open.")) return;
+  try {
+    await DB.setStatus(list.filter(j => j.date).map(j => j.id), "scheduled");
+    await DB.setStatus(list.filter(j => !j.date).map(j => j.id), "open");
+    toast("Reopened " + list.length + " job" + (list.length === 1 ? "" : "s"));
+  } catch (err) { fail("Not reopened", err); }
+  await reload();
+}
+let projNoteT = null;
+const dirtyProjNotes = new Set();
+function flushProjNotes() {
+  clearTimeout(projNoteT);
+  for (const p of [...dirtyProjNotes]) {
+    const text = projectNotes[p] || "";
+    DB.saveProjectNote(p, text).then(() => { if ((projectNotes[p] || "") === text) dirtyProjNotes.delete(p); }).catch(e => fail("Project note not saved", e));
+  }
+}
+function saveProjNotes() { clearTimeout(projNoteT); projNoteT = setTimeout(flushProjNotes, 600); }
+
 
 /* ---------- plan loads ---------- */
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -1445,7 +1549,7 @@ function openEditor(id, preset) {
   $("#jobForm").classList.toggle("slotmode", !!(j && j.slot));
   renderSlotBox(j && j.slot ? j : null, "");
   $("#btnDelete").hidden = !j;
-  $("#btnUnslot").hidden = !(j && !j.slot && j.project && j.date && j.status !== "done");
+  $("#btnUnslot").hidden = !(j && !j.slot && j.project && j.date && !DJ.closed(j));
   const base = j || Object.assign({ status: "open", date: ui.view === "board" ? ui.boardDate : "", project: ui.view === "projects" ? ui.project : "" }, preset || {});
   if (!j && preset && preset.date) base.status = "scheduled";
   for (const [k] of DJ.FIELDS) $("#f_" + k).value = base[k] == null ? "" : base[k];
@@ -1612,7 +1716,7 @@ $("#btnUnslot").onclick = async () => {
 
 /* ================= Wiring ================= */
 document.addEventListener("click", e => {
-  const card = e.target.closest(".card,tr.row"); if (card && card.dataset.id) { openEditor(card.dataset.id); return; }
+  const card = e.target.closest(".card,tr.row"); if (card && card.dataset.id && !e.target.closest("table.editing")) { openEditor(card.dataset.id); return; }
   if (!e.target.closest(".menu")) $("#menuList").classList.remove("open");
 });
 $("#nav").onclick = e => { const b = e.target.closest("[data-view]"), v = b && b.dataset.view; if (v) { ui.view = v; saveUi(); render(); } };
@@ -1720,6 +1824,9 @@ function selfTest() {
   const un = DJ.unfillSlot(filled);
   ok("put back in project list", un.unit.id === "u1" && un.unit.date === "" && un.unit.status === "open" && !un.unit.slot && un.unit.shippingContainer === "MSCU1234566" &&
     un.slot.slot && un.slot.id !== "u1" && un.slot.date === "2026-10-27" && un.slot.time === "10:00" && un.slot.project === "P" && un.slot.shippingContainer === "" && DJ.slotCandidates([un.unit], un.slot).length === 1);
+  const cj = [DJ.cleanJob({ id: "a", project: "P", status: "scheduled" }), DJ.cleanJob({ id: "b", project: "P", status: "done" }), DJ.cleanJob({ id: "c", project: "P", slot: true }), DJ.cleanJob({ id: "d", project: "P", status: "cancelled" }), DJ.cleanJob({ id: "e", project: "Q" })];
+  const cp = DJ.cancelPlan(cj, "P");
+  ok("cancel project", cp.cancel.join() === "a" && cp.drop.join() === "c" && DJ.closed(cj[3]) && !DJ.closed(cj[0]) && DJ.applyFilters(cj, { status: "active" }).map(j => j.id).join() === "a,c,e" && DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", status: "cancelled" })], "2026-10-21").length === 0);
   ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&
     DJ.parseImport([["Client", "ΑΠΟΣΤΟΛΈΑΣ", "Παραλήπτης", "Date"], ["C", "Snd", "Rcv", ""]], []).jobs[0].job.receiver === "Rcv" && DJ.applyFilters([DJ.cleanJob({ sender: "X" }), DJ.cleanJob({})], { sender: "X" }).length === 1);
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
