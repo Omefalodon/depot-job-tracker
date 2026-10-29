@@ -44,8 +44,8 @@ function handle(page, st) {
   return { data: st.single ? (data[0] || null) : data, error: null };
 }
 const b = await chromium.launch();
-async function open(name) {
-  const ctx = await b.newContext({ viewport: { width: 1450, height: 900 } });
+async function open(name, phone) {
+  const ctx = await b.newContext(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 1450, height: 900 } });
   await ctx.route('**/index.html', async r => { const res = await r.fetch(); const body = (await res.text()).replace(/ integrity="[^"]+"/, ''); r.fulfill({ response: res, body }); });
   await ctx.route('**/vendor/supabase-2.117.2.js', r => r.fulfill({ status: 200, contentType: 'application/javascript', body: fake }));
   const wxDays = [...Array(16)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d.toLocaleDateString('sv'); });
@@ -230,6 +230,36 @@ await G.click('#cancelProj'); await G.waitForTimeout(900);
 log('cancel project:', (G._lastDialog || '').split('\n')[0], '| statuses:', JSON.stringify([...new Set(projJobs().map(j => j.status))]), '| slots left:', projJobs().filter(j => j.is_slot).length, '| done kept:', projJobs().filter(j => j.status === 'done').length === doneBefore, '| side panel shows them:', await G.locator('#sideList .card').filter({ hasText: projName }).count());
 await G.click('#reopenProj'); await G.waitForTimeout(900);
 log('reopen:', JSON.stringify([...new Set(projJobs().map(j => j.status))]));
+// Phone: hold a tile, then drag it (touch has no mouse drag & drop)
+const P = await open('phone', true);
+await P.fill('#lg_email', 'george@test'); await P.fill('#lg_pw', 'pw-george-123'); await P.click('#lg_btn'); await P.waitForSelector('#gate', { state: 'hidden' });
+const cdp = await P.context().newCDPSession(P);
+const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+async function touchDrag(from, to, hold = 500) {
+  const a = await from.boundingBox(); let c = await to.boundingBox();
+  await touch('touchStart', a.x + 20, a.y + 10); await P.waitForTimeout(hold);
+  for (let i = 1; i <= 6; i++) { c = await to.boundingBox(); await touch('touchMove', a.x + 20 + (c.x + 20 - a.x - 20) * i / 6, a.y + 10 + (c.y + 15 - a.y - 10) * i / 6); await P.waitForTimeout(40); }
+  await touch('touchEnd'); await P.waitForTimeout(700);
+}
+const blank = { client: '', sender: '', receiver: '', shipping_container: '', hct_container: '', truck_plate: '', transporter: '', cargo_type: '', project: '', ref: '', notes: '', weight: null, pieces: null, job_time: null, checklist: [], is_slot: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+const todayIso = new Date().toLocaleDateString('sv');
+db.jobs.push(Object.assign({}, blank, { id: 'touch1', client: 'Touch one', job_date: todayIso, status: 'scheduled' }), Object.assign({}, blank, { id: 'touch2', client: 'Touch two', job_date: todayIso, status: 'in-progress' }));
+await P.evaluate(() => reload()); await P.click('nav [data-view=board]'); await P.waitForTimeout(400);
+const tCard = P.locator('#main .card[data-id=touch1]'); const tId = await tCard.getAttribute('data-id');
+if (tId) { await tCard.scrollIntoViewIfNeeded(); await touchDrag(tCard, P.locator('.col[data-status=in-progress]')); }
+await P.screenshot({ path: new URL('./p-board.png', import.meta.url).pathname }); log('phone today drag:', tId ? db.jobs.find(j => j.id === tId).status : 'no card', '| editor opened:', await P.isVisible('#dlg'));
+// a quick swipe (no hold) must scroll, not move
+const sCard = P.locator('#main .card[data-id=touch2]'); const sId = await sCard.getAttribute('data-id');
+if (sId) await touchDrag(sCard, P.locator('.col[data-status=done]'), 50);
+log('quick swipe left it alone:', sId ? db.jobs.find(j => j.id === sId).status : 'no card');
+// Week: from the side panel into a slot
+await P.click('nav [data-view=week]'); await P.waitForTimeout(300);
+if (!(await P.isVisible('aside'))) await P.click('#btnPanel');
+const pCard = P.locator('#sideList .card[draggable]').first(); const pId = await pCard.getAttribute('data-id');
+const pSlot = P.locator('.slot[data-time="09:00"]').first(); const pDay = await pSlot.getAttribute('data-day');
+await touchDrag(pCard, pSlot);
+const pj = db.jobs.find(j => j.id === pId); log('phone panel -> week:', pj.job_date === pDay, pj.job_time, '| panel closed:', !(await P.isVisible('aside')));
+await P.screenshot({ path: new URL('./p-week.png', import.meta.url).pathname });
 // export as admin
 await G.click('nav [data-view=projects]'); const [dl] = await Promise.all([G.waitForEvent('download'), G.click('#exportProj')]); await dl.saveAs(new URL('./out.xlsx', import.meta.url).pathname);
 await G.screenshot({ path: new URL('./g-projects.png', import.meta.url).pathname }); await G.click('nav [data-view=week]'); await G.screenshot({ path: new URL('./g-week.png', import.meta.url).pathname });
@@ -238,5 +268,5 @@ await G.locator('#sideList .card').first().click(); await G.click('#btnDelete');
 log('deleted, jobs:', db.jobs.length, 'prices:', db.job_prices.length, 'files:', db.job_files.length, 'objects:', Object.keys(objects).length);
 // sign out
 await G.click('#btnMenu'); await G.click('[data-act=signout]'); await G.waitForTimeout(300); log('after sign out gate visible:', await G.isVisible('#gate'));
-for (const [n, p] of [['G', G], ['M', M], ['N', N]]) log(n, 'errors:', p._errs);
+for (const [n, p] of [['G', G], ['M', M], ['N', N], ['P', P]]) log(n, 'errors:', p._errs);
 await b.close();

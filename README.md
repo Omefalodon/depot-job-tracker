@@ -31,6 +31,10 @@ transporter, cargo, dates, invoice number); click rows to select (Shift+click fo
 number and press *Set on selected*. Office + admin only, like prices; every change is in the job's
 history.
 
+## Phones and tablets
+
+Touch screens have no mouse drag, so tiles drag after a short hold (about a third of a second): hold, then move. A quick swipe still scrolls. Dragging near the screen edge scrolls the view. On a phone the open-jobs panel hides while you drag from it and closes after the drop. Today's columns stack on narrow screens.
+
 ## Projects
 
 - **Notes:** one free-text note per project (table `project_notes`), seen and edited by all users.

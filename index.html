@@ -54,6 +54,10 @@ aside.hidden{display:none}
 .side-list{overflow:auto;flex:1;padding:6px}
 main{flex:1;overflow:auto;padding:14px;min-width:0}
 .card{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--s-open);border-radius:8px;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+.card[draggable]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.card.lifting{opacity:.35}
+aside.tdhide{visibility:hidden}
+.dragghost{position:fixed;z-index:1000;pointer-events:none;opacity:.9;box-shadow:0 6px 18px rgba(0,0,0,.25);transform:rotate(2deg);margin:0}
 .card:hover{border-color:var(--accent);border-left-color:inherit}
 .card .t{font-weight:600;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;justify-content:space-between}
 .card .m{color:var(--muted);font-size:12px}
@@ -199,6 +203,8 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
   aside{position:fixed;z-index:15;top:52px;bottom:0;left:0;width:88vw;box-shadow:4px 0 20px rgba(0,0,0,.2)}
   .grid{grid-template-columns:1fr}
   .projects{grid-template-columns:1fr}
+  .board{grid-template-columns:1fr}
+  .board .col{min-height:70px}
   main{padding:10px 16px}
 }
 </style>
@@ -1201,7 +1207,7 @@ function renderBoard() {
   const list = jobs.filter(j => j.date === d && j.status !== "cancelled" && DJ.matches(j, q));
   $("#main").innerHTML =
     '<div class="toolbar"><h2>' + (d === todayStr() ? "Today" : "Day") + '</h2><button id="bPrev" aria-label="Previous day">‹</button><input type="date" id="bDate" value="' + esc(d) + '"><button id="bNext" aria-label="Next day">›</button><button id="bToday">Today</button><button id="bPrint" title="Printable list of the jobs to do this day, for the depot (no prices)">🖨 Day sheet</button><button id="bSheetX" title="The same day sheet as an Excel file you can edit">Day sheet (Excel)</button>' +
-    '<span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' · drag a card to change its status</span></div>' +
+    '<span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + ' · ' + (matchMedia('(hover: none)').matches ? 'hold a card, then drag it' : 'drag a card') + ' to change its status</span></div>' +
     '<div class="board">' + DJ.STATUSES.filter(s => s !== "cancelled").map(s => {
       const l = list.filter(j => j.status === s).sort(byDate);
       return '<div class="col" data-status="' + s + '"><h3><span class="p-' + s + '">' + DJ.STATUS_LABEL[s] + '</span><span style="color:var(--muted)">' + l.length + '</span></h3>' + l.map(j => cardHtml(j, q, true)).join("") + '</div>';
@@ -1305,8 +1311,15 @@ $("#planForm").addEventListener("submit", async e => {
 });
 
 $("#sideList").addEventListener("dragstart", e => { const c = e.target.closest(".card[draggable]"); if (c) { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; } });
+function moveJob(col, id, apply) {
+  const job = jobs.find(j => j.id === id); if (!job) return;
+  const before = { date: job.date, time: job.time, status: job.status };
+  apply(job, col); render();
+  DB.patchJob(job).catch(err => { Object.assign(job, before); render(); fail("Move not saved", err); });
+}
+let dropTarget = null; // { sel, apply } of the current view, for touch dragging
 function wireDrag(sel, apply) {
-  const main = $("#main");
+  const main = $("#main"); dropTarget = { sel, apply };
   main.querySelectorAll('.card[draggable]').forEach(c => c.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; }));
   main.querySelectorAll(sel).forEach(col => {
     col.addEventListener("dragover", e => { if (hasFiles(e)) return; e.preventDefault(); col.classList.add("dragover"); });
@@ -1314,13 +1327,58 @@ function wireDrag(sel, apply) {
     col.addEventListener("drop", e => {
       if (hasFiles(e)) return;
       e.preventDefault(); col.classList.remove("dragover");
-      const job = jobs.find(j => j.id === e.dataTransfer.getData("text/plain")); if (!job) return;
-      const before = { date: job.date, time: job.time, status: job.status };
-      apply(job, col); render();
-      DB.patchJob(job).catch(err => { Object.assign(job, before); render(); fail("Move not saved", err); });
+      moveJob(col, e.dataTransfer.getData("text/plain"), apply);
     });
   });
 }
+/* ---- touch: hold a tile for a moment, then drag it (phones and tablets have no mouse drag) ---- */
+let td = null, tdJustDropped = 0;
+function tdEnd() { if (!td) return; clearTimeout(td.timer); $("aside").classList.remove("tdhide"); if (td.ghost) td.ghost.remove(); if (td.over) td.over.classList.remove("dragover"); if (td.card) td.card.classList.remove("lifting"); td = null; }
+function tdTargetAt(x, y) { const el = document.elementFromPoint(x, y); return el && dropTarget && $("#main").contains(el) ? el.closest(dropTarget.sel) : null; }
+document.addEventListener("touchstart", e => {
+  if (e.touches.length !== 1) { tdEnd(); return; }
+  const c = e.target.closest('.card[draggable]'); if (!c || !dropTarget) return;
+  const t = e.touches[0];
+  td = { card: c, id: c.dataset.id, x: t.clientX, y: t.clientY, on: false };
+  td.timer = setTimeout(() => {
+    if (!td) return;
+    td.on = true; c.classList.add("lifting");
+    const r = c.getBoundingClientRect(), g = c.cloneNode(true);
+    g.className += " dragghost"; g.style.width = r.width + "px"; g.style.left = (td.x - r.width / 2) + "px"; g.style.top = (td.y - 20) + "px";
+    document.body.appendChild(g); td.ghost = g;
+    td.fromPanel = !!c.closest("aside") && window.innerWidth < 760; if (td.fromPanel) $("aside").classList.add("tdhide"); // on a phone the panel covers the week
+    if (navigator.vibrate) navigator.vibrate(15);
+  }, 350);
+}, { passive: true });
+document.addEventListener("touchmove", e => {
+  if (!td) return;
+  const t = e.touches[0];
+  if (!td.on) { if (Math.abs(t.clientX - td.x) > 10 || Math.abs(t.clientY - td.y) > 10) tdEnd(); return; } // finger moved first: it's a scroll
+  e.preventDefault();
+  td.ghost.style.left = (t.clientX - td.ghost.offsetWidth / 2) + "px"; td.ghost.style.top = (t.clientY - 20) + "px";
+  const over = tdTargetAt(t.clientX, t.clientY);
+  if (over !== td.over) { if (td.over) td.over.classList.remove("dragover"); if (over) over.classList.add("dragover"); td.over = over; }
+  // near the top or bottom edge: scroll the view so far-away days and hours can be reached
+  const m = $("#main"), mr = m.getBoundingClientRect();
+  if (t.clientY > mr.bottom - 40) m.scrollTop += 12; else if (t.clientY < mr.top + 40) m.scrollTop -= 12;
+  // and sideways, for the week grid that is wider than a phone
+  const el = document.elementFromPoint(t.clientX, t.clientY);
+  for (let x = el; x && x !== m.parentElement; x = x.parentElement) if (x.scrollWidth > x.clientWidth + 2 && getComputedStyle(x).overflowX !== "visible") {
+    if (t.clientX > innerWidth - 36) x.scrollLeft += 12; else if (t.clientX < 36) x.scrollLeft -= 12;
+    break;
+  }
+}, { passive: false });
+document.addEventListener("touchend", e => {
+  if (!td) return;
+  if (td.on) {
+    const t = e.changedTouches[0], over = tdTargetAt(t.clientX, t.clientY), id = td.id, ap = dropTarget.apply, fromPanel = td.fromPanel;
+    e.preventDefault(); tdJustDropped = Date.now(); tdEnd();
+    if (over && fromPanel) { ui.panel = false; saveUi(); }
+    if (over) moveJob(over, id, ap);
+  } else tdEnd();
+}, { passive: false });
+document.addEventListener("touchcancel", tdEnd);
+document.addEventListener("contextmenu", e => { if (td && e.target.closest('.card[draggable]')) e.preventDefault(); });
 
 const SHEET_HEAD = ["Time", "Client", "Shipping container", "HCT container", "Cargo type", "Truck plate", "Done"];
 function daySheetExcel(day) {
@@ -1474,7 +1532,7 @@ $("#impGo").onclick = async () => {
 };
 
 function render() {
-  pendingRender = false;
+  pendingRender = false; dropTarget = null;
   if (!me || !loaded) return;
   $("#navUsers").hidden = !isAdmin();
   { const nNew = suggestions.filter(x => x.status === "new").length; $("#navSug").innerHTML = "💡 Suggestions" + (nNew ? '<span class="navbadge" title="New suggestions">' + nNew + '</span>' : ""); }
@@ -1716,6 +1774,7 @@ $("#btnUnslot").onclick = async () => {
 
 /* ================= Wiring ================= */
 document.addEventListener("click", e => {
+  if (Date.now() - tdJustDropped < 400) return; // the tap that ended a touch drag
   const card = e.target.closest(".card,tr.row"); if (card && card.dataset.id && !e.target.closest("table.editing")) { openEditor(card.dataset.id); return; }
   if (!e.target.closest(".menu")) $("#menuList").classList.remove("open");
 });
