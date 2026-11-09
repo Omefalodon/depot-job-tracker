@@ -39,6 +39,7 @@ Touch screens have no mouse drag, so tiles drag after a short hold (about a thir
 
 - **Notes:** one free-text note per project (table `project_notes`), seen and edited by all users.
 - **Cancel project:** every unfinished job of the project gets status Cancelled and its empty planned loads are removed; Done jobs stay. Cancelled jobs drop off Week, Today, the side panel and the day sheet. **Reopen cancelled** sets them back to Scheduled (with a date) or Open.
+- **Archive** (office/admin): a finished project disappears from the project list, the project suggestions and the side panel; nothing is deleted and its jobs still show in All jobs, Week and Today. Tick **Show archived** to see it again and **Unarchive** it. Table `archived_projects`.
 - **✎ Edit in table** (All jobs and Projects): cells become inputs and each one saves when you leave it, with the same conflict check as the editor. Planned loads only allow date, time and status there.
 
 ## Suggestions

@@ -72,6 +72,8 @@ table.editing input,table.editing select{width:100%;min-width:70px;padding:3px 4
 table.editing input[type=date]{min-width:120px} table.editing input[type=time]{min-width:80px}
 .edtoggle{display:flex;gap:6px;align-items:center;margin:0;font-size:13px;color:var(--text);cursor:pointer}
 .edtoggle input{width:auto}
+.plist button.archived span:first-child{color:var(--muted)}
+.archnote{margin:0 0 10px;color:var(--muted);font-size:13px}
 .projnote{width:100%;min-height:70px;margin:0 0 10px;font:inherit;resize:vertical}
 .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .toolbar h2{font-size:18px;margin:0 8px 0 0}
@@ -799,7 +801,7 @@ if (!window.supabase) { document.body.innerHTML = "<p style=\"padding:20px\">The
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 let me = null;            // my profile row
 let people = {};          // id -> profile
-let jobs = [], dayNotes = {}, projectNotes = {}, files = {}, suggestions = [], votes = [], online = true, loaded = false; // files: job id -> attachments
+let jobs = [], dayNotes = {}, projectNotes = {}, archived = new Set(), files = {}, suggestions = [], votes = [], online = true, loaded = false; // files: job id -> attachments
 const dirtyNotes = new Set();
 function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch (e) { return {}; } }
 function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) { } }
@@ -821,7 +823,7 @@ async function allRows(make) {
 }
 const DB = {
   async loadAll() {
-    const [j, pr, n, pp, fl, iv, sg, sv, pn] = await Promise.all([
+    const [j, pr, n, pp, fl, iv, sg, sv, pn, ar] = await Promise.all([
       allRows(() => sb.from("jobs").select("*").order("id")),
       seesPrices() ? allRows(() => sb.from("job_prices").select("job_id,price").order("job_id")) : Promise.resolve({ data: [] }),
       sb.from("day_notes").select("day,note"),
@@ -830,9 +832,11 @@ const DB = {
       seesPrices() ? allRows(() => sb.from("job_invoices").select("job_id,invoice_no,invoiced_on").order("job_id")) : Promise.resolve({ data: [] }),
       allRows(() => sb.from("suggestions").select("id,body,status,admin_note,created_at,created_by").order("created_at")),
       allRows(() => sb.from("suggestion_votes").select("suggestion_id,user_id").order("suggestion_id")),
-      sb.from("project_notes").select("project,note")
+      sb.from("project_notes").select("project,note"),
+      sb.from("archived_projects").select("project")
     ]);
-    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error || sg.error || sv.error || pn.error; if (err) throw err;
+    const err = j.error || pr.error || n.error || pp.error || fl.error || iv.error || sg.error || sv.error || pn.error || ar.error; if (err) throw err;
+    archived = new Set(ar.data.map(r => r.project));
     const keepP = {}; for (const p of dirtyProjNotes) keepP[p] = projectNotes[p];
     projectNotes = {}; for (const r of pn.data) projectNotes[r.project] = r.note;
     Object.assign(projectNotes, keepP);
@@ -923,6 +927,10 @@ const DB = {
   async setStatus(ids, status) {
     for (let i = 0; i < ids.length; i += 100) { const r = await sb.from("jobs").update({ status }).in("id", ids.slice(i, i + 100)); if (r.error) throw r.error; }
   },
+  async setArchived(project, on) {
+    const r = on ? await sb.from("archived_projects").insert({ project }) : await sb.from("archived_projects").delete().eq("project", project);
+    if (r.error) throw r.error;
+  },
   async saveProjectNote(project, text) {
     const r = text.trim() ? await sb.from("project_notes").upsert({ project, note: text.slice(0, 8000) }) : await sb.from("project_notes").delete().eq("project", project);
     if (r.error) throw r.error;
@@ -961,6 +969,7 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "job_prices" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "day_notes" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "project_notes" }, reloadSoon)
+    .on("postgres_changes", { event: "*", schema: "public", table: "archived_projects" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_files" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "job_invoices" }, reloadSoon)
     .on("postgres_changes", { event: "*", schema: "public", table: "suggestions" }, reloadSoon)
@@ -1073,7 +1082,7 @@ function wxHtml(day) {
 /* ================= Side panel ================= */
 function renderSide() {
   const q = $("#search").value;
-  const list = jobs.filter(j => !DJ.closed(j) && DJ.matches(j, q)).sort(byDate);
+  const list = jobs.filter(j => !DJ.closed(j) && !archived.has(j.project.trim()) && DJ.matches(j, q)).sort(byDate);
   $("#sideCount").textContent = list.length + " open job" + (list.length === 1 ? "" : "s") + (q ? " matching" : "");
   const drag = ui.view === "week" || ui.view === "board"; // side cards can be dropped on Week slots and Today columns
   $("#sideList").innerHTML = list.length ? list.map(j => cardHtml(j, q, drag)).join("") : '<div class="empty">' + (q ? "No open jobs match." : "No open jobs.") + '</div>';
@@ -1224,7 +1233,8 @@ function renderBoard() {
 
 function renderProjects() {
   const q = $("#search").value;
-  const names = [...new Set(jobs.map(j => j.project.trim()))].sort((a, b) => a === "" ? 1 : b === "" ? -1 : a.localeCompare(b));
+  const all = [...new Set(jobs.map(j => j.project.trim()))].sort((a, b) => a === "" ? 1 : b === "" ? -1 : a.localeCompare(b));
+  const nArch = all.filter(n => archived.has(n)).length, names = ui.showArchived ? all : all.filter(n => !archived.has(n));
   if (ui.project && !names.includes(ui.project)) ui.project = "";
   const sel = ui.project || names.find(n => n) || (names.length ? "" : null);
   const list = sel === null ? [] : jobs.filter(j => j.project.trim() === sel && DJ.matches(j, q)).sort(byDate);
@@ -1232,11 +1242,14 @@ function renderProjects() {
   const plan = sel ? DJ.cancelPlan(jobs, sel) : { cancel: [], drop: [] }, nCancelled = sel ? jobs.filter(j => j.project.trim() === sel && j.status === "cancelled").length : 0;
   const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"], ["ref", "Ref"]];
   $("#main").innerHTML = '<div class="projects"><div class="plist"><div class="toolbar"><h2>Projects</h2><div class="spacer"></div><button id="planBtn" title="Create a number of loads per day for a project, details filled in later">+ Plan loads</button></div>' +
-    (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + '"><span>' + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
+    (nArch ? '<label class="edtoggle" style="margin:0 0 8px"><input type="checkbox" id="showArch"' + (ui.showArchived ? ' checked' : '') + '>Show archived (' + nArch + ')</label>' : '') +
+    (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + (archived.has(n) ? ' archived' : '') + '"><span>' + (archived.has(n) ? '🗄 ' : '') + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
     '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle() + '<div class="spacer"></div>' +
       (sel && plan.cancel.length + plan.drop.length ? '<button id="cancelProj" class="danger" title="Mark every unfinished job of this project Cancelled and remove its empty planned loads">Cancel project</button>' : '') +
       (nCancelled ? '<button id="reopenProj" title="Set the cancelled jobs of this project back to Open / Scheduled">Reopen cancelled (' + nCancelled + ')</button>' : '') +
+      (sel && seesPrices() ? (archived.has(sel) ? '<button id="archProj" title="Show this project in the lists again">Unarchive</button>' : '<button id="archProj" title="Finished: hide this project from the project list, suggestions and the side panel. Nothing is deleted.">Archive</button>') : '') +
       '<button id="exportProj" class="primary">Export to Excel</button></div>' +
+      (sel && archived.has(sel) ? '<p class="archnote">🗄 Archived project. Its jobs are kept and still show in All jobs, Week and Today.</p>' : '') +
       (sel ? '<textarea class="projnote" id="projNote" maxlength="8000" placeholder="Notes for this project…" aria-label="Notes for project ' + esc(sel) + '">' + esc(projectNotes[sel] || "") + '</textarea>' : '') +
       (list.length ? jobTable(list, cols, q, false) + (list.length ? '<p style="color:var(--muted);font-size:12px">Total weight: ' + list.reduce((a, j) => a + (+j.weight || 0), 0).toLocaleString() + ' kg · Total pieces: ' + list.reduce((a, j) => a + (+j.pieces || 0), 0).toLocaleString() + (seesPrices() ? ' · Total price: € ' + list.reduce((a, j) => a + (+j.price || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '') + '</p>' : '') : '<div class="empty">No jobs match.</div>') : '') + '</div></div>';
   $("#main").querySelectorAll("[data-p]").forEach(b => b.onclick = () => { ui.project = b.dataset.p; saveUi(); render(); });
@@ -1247,6 +1260,16 @@ function renderProjects() {
   if (pn) { pn.addEventListener("input", () => { if (pn.value.trim()) projectNotes[sel] = pn.value; else delete projectNotes[sel]; dirtyProjNotes.add(sel); saveProjNotes(); }); pn.addEventListener("blur", flushProjNotes); }
   const cp = $("#cancelProj"); if (cp) cp.onclick = () => cancelProject(sel, plan);
   const rp = $("#reopenProj"); if (rp) rp.onclick = () => reopenProject(sel);
+  const sa = $("#showArch"); if (sa) sa.onchange = () => { ui.showArchived = sa.checked; saveUi(); render(); };
+  const ap = $("#archProj"); if (ap) ap.onclick = () => archiveProject(sel, !archived.has(sel));
+}
+async function archiveProject(name, on) {
+  const open = jobs.filter(j => j.project.trim() === name && !DJ.closed(j)).length;
+  if (on && !confirm("Archive project “" + name + "”?\n\nIt disappears from the project list, the project suggestions and the side panel. Nothing is deleted, and you can unarchive it with “Show archived”." +
+    (open ? "\n\n" + open + " job" + (open === 1 ? " is" : "s are") + " not Done or Cancelled yet and will be hidden from the side panel too. Use Cancel project first if they won't happen." : ""))) return;
+  try { await DB.setArchived(name, on); if (on) { archived.add(name); if (!ui.showArchived) ui.project = ""; } else archived.delete(name); saveUi(); toast("Project “" + name + "” " + (on ? "archived" : "back in the list")); }
+  catch (err) { fail(on ? "Not archived" : "Not unarchived", err); }
+  await reload();
 }
 async function cancelProject(name, plan) {
   if (!confirm("Cancel project “" + name + "”?\n\n" + plan.cancel.length + " unfinished job" + (plan.cancel.length === 1 ? "" : "s") + " will be marked Cancelled (they stay in the list and can be reopened)" +
@@ -1550,7 +1573,7 @@ function render() {
 
 function refreshDatalists() {
   for (const k of ["client", "sender", "receiver", "project", "transporter", "cargoType", "truckPlate"]) {
-    const vals = [...new Set(jobs.map(j => j[k]).filter(Boolean))].sort().slice(0, 300);
+    const vals = [...new Set(jobs.map(j => j[k]).filter(v => v && !(k === "project" && archived.has(v.trim()))))].sort().slice(0, 300);
     $("#dl_" + k).innerHTML = vals.map(v => '<option value="' + esc(v) + '">').join("");
   }
 }

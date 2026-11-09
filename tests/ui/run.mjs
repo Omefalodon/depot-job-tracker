@@ -8,7 +8,7 @@ const db = { profiles: [
   { id: "u-george", email: "george@test", full_name: "George", role: "admin", active: true },
   { id: "u-maria", email: "maria@test", full_name: "Maria", role: "office", active: true },
   { id: "u-new", email: "new@test", full_name: "", role: "office", active: false }],
-  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [], suggestions: [], suggestion_votes: [], project_notes: [] };
+  jobs: [], job_prices: [], day_notes: [], job_history: [], job_files: [], job_invoices: [], suggestions: [], suggestion_votes: [], project_notes: [], archived_projects: [] };
 const objects = {}; // storage bucket job-files: path -> {size, contentType}
 const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'text/plain', 'application/vnd.ms-outlook'];
 const pk = { jobs: "id", job_prices: "job_id", day_notes: "day", profiles: "id", job_invoices: "job_id", project_notes: "project" };
@@ -230,6 +230,14 @@ await G.click('#cancelProj'); await G.waitForTimeout(900);
 log('cancel project:', (G._lastDialog || '').split('\n')[0], '| statuses:', JSON.stringify([...new Set(projJobs().map(j => j.status))]), '| slots left:', projJobs().filter(j => j.is_slot).length, '| done kept:', projJobs().filter(j => j.status === 'done').length === doneBefore, '| side panel shows them:', await G.locator('#sideList .card').filter({ hasText: projName }).count());
 await G.click('#reopenProj'); await G.waitForTimeout(900);
 log('reopen:', JSON.stringify([...new Set(projJobs().map(j => j.status))]));
+// Archive the project: gone from the list, suggestions and side panel; Show archived brings it back; Unarchive
+await G.click('#archProj'); await G.waitForTimeout(900);
+log('archive:', (G._lastDialog || '').split('\n')[0], '| db:', JSON.stringify(db.archived_projects.map(a => a.project)), '| in list:', await G.locator('.plist [data-p="' + projName + '"]').count(),
+  '| in suggestions:', await G.locator('#dl_project option[value="' + projName + '"]').count(), '| side panel:', await G.locator('#sideList .card').filter({ hasText: projName }).count(), '| maria list:', await M.locator('.plist [data-p="' + projName + '"]').count(), '| maria archive button:', await M.locator('#archProj').count());
+await G.check('#showArch'); await G.locator('.plist [data-p="' + projName + '"]').click(); await G.waitForTimeout(200);
+log('show archived:', (await G.textContent('.plist [data-p="' + projName + '"]')).startsWith('🗄'), '| button:', await G.textContent('#archProj'));
+await G.click('#archProj'); await G.waitForTimeout(900); await G.uncheck('#showArch').catch(() => { });
+log('unarchive:', db.archived_projects.length, '| in list:', await G.locator('.plist [data-p="' + projName + '"]').count());
 // Phone: hold a tile, then drag it (touch has no mouse drag & drop)
 const P = await open('phone', true);
 await P.fill('#lg_email', 'george@test'); await P.fill('#lg_pw', 'pw-george-123'); await P.click('#lg_btn'); await P.waitForSelector('#gate', { state: 'hidden' });
