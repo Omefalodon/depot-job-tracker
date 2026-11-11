@@ -213,6 +213,32 @@ await G.click('#navSug .navbadge'); await G.locator('.sug [data-vote]').first().
 await G.selectOption('.sug [data-status]', 'planned'); await G.waitForTimeout(500); await G.fill('.sug [data-note]', 'Next week'); await G.locator('.sug [data-note]').press('Tab'); await G.waitForTimeout(600);
 await M.waitForTimeout(400); await M.locator('.sug [data-vote]').first().click(); await M.waitForTimeout(600);
 log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.admin_note])), '| votes:', db.suggestion_votes.length, '| maria sees reply:', (await M.textContent('.sug')).includes('Next week'), '| maria has status menu:', await M.locator('.sug [data-status]').count()); await G.screenshot({ path: new URL('./g-sug.png', import.meta.url).pathname });
+// Done -> e-mail to the depot: only shipping container without HCT container, only from Week / Today
+{
+  const blankRow = { client: '', sender: '', receiver: '', shipping_container: '', hct_container: '', truck_plate: '', transporter: '', cargo_type: '', project: '', ref: '', notes: '', weight: null, pieces: null, job_time: null, checklist: [], is_slot: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const td0 = new Date().toLocaleDateString('sv');
+  db.jobs.push(Object.assign({}, blankRow, { id: 'mail1', client: 'Mail client', shipping_container: 'MSCU1234566', job_date: td0, status: 'in-progress', pieces: 12 }),
+    Object.assign({}, blankRow, { id: 'mail2', client: 'Both', shipping_container: 'MSCU1234566', hct_container: 'HCTU0000011', job_date: td0, status: 'in-progress' }));
+  await G.evaluate(() => { window.__mail = null; DJ.mailtoUrl = m => { window.__mail = m; return '#'; }; return reload(); });
+  await G.click('nav [data-view=board]'); await G.click('#bToday'); await G.waitForTimeout(300);
+  await G.locator('#main .card[data-id=mail2]').dragTo(G.locator('.col[data-status=done]')); await G.waitForTimeout(600);
+  log('done mail, with HCT container:', await G.isVisible('#mailDlg'));
+  await G.locator('#main .card[data-id=mail1]').dragTo(G.locator('.col[data-status=done]')); await G.waitForTimeout(600);
+  log('done mail popup:', await G.isVisible('#mailDlg'), '| to:', await G.inputValue('#mailTo'), '| subject:', await G.inputValue('#mailSubj'), '| greek body:', (await G.inputValue('#mailBody')).split('\n')[2]);
+  await G.fill('#mailBody', (await G.inputValue('#mailBody')) + '\nΕυχαριστώ'); await G.check('input[name=mkind][value=filled]'); await G.waitForTimeout(150);
+  log('filled rewrite (after confirm):', await G.inputValue('#mailSubj'));
+  await G.fill('#mailBody', (await G.inputValue('#mailBody')).replace('Με εκτίμηση', 'Φιλικά')); await G.click('#mailSend'); await G.waitForTimeout(200);
+  const sent = await G.evaluate(() => window.__mail);
+  log('send:', sent && sent.to, '| edited text kept:', !!sent && sent.body.includes('Φιλικά'), '| popup closed:', !(await G.isVisible('#mailDlg')));
+  await G.click('nav [data-view=all]'); await G.evaluate(() => openEditor('mail2')); await G.selectOption('#f_status', 'in-progress'); await G.click('#btnSave'); await G.waitForTimeout(500);
+  await G.evaluate(() => openEditor('mail1')); await G.selectOption('#f_status', 'in-progress'); await G.click('#btnSave'); await G.waitForTimeout(500);
+  await G.evaluate(() => openEditor('mail1')); await G.selectOption('#f_status', 'done'); await G.click('#btnSave'); await G.waitForTimeout(600);
+  log('done from All jobs, no popup:', !(await G.isVisible('#mailDlg')));
+  await G.click('nav [data-view=week]'); await G.click('#wToday'); await G.waitForTimeout(200);
+  await G.locator('#main .card[data-id=mail1]').click(); await G.selectOption('#f_status', 'in-progress'); await G.click('#btnSave'); await G.waitForTimeout(500);
+  await G.locator('#main .card[data-id=mail1]').click(); await G.selectOption('#f_status', 'done'); await G.click('#btnSave'); await G.waitForTimeout(600);
+  log('done from Week editor popup:', await G.isVisible('#mailDlg')); await G.click('#mailDlg [data-mclose]');
+}
 // Column picker on All jobs: hide Sender, move Client first, add Free text; remembered after reload; reset
 await G.click('nav [data-view=all]'); await G.click('#colBtn'); await G.waitForTimeout(150);
 const colRow = name => G.locator('#colList .colrow').filter({ hasText: name });

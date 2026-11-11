@@ -35,6 +35,10 @@ history.
 
 Touch screens have no mouse drag, so tiles drag after a short hold (about a third of a second): hold, then move. A quick swipe still scrolls. Dragging near the screen edge scrolls the view. On a phone the open-jobs panel hides while you drag from it and closes after the drop. Today's columns stack on narrow screens.
 
+## Done e-mail to the depot
+
+When a job with a shipping-line container and no HCT container is marked Done from Week or Today (drag to Done, or the editor), a popup offers an editable Greek message to depot@hct.gr (Emptied / Filled). For now **Open in e-mail to send** hands it to the user's own e-mail app (mailto); sending straight from the app needs a mail service and a Supabase Edge Function (not set up yet).
+
 ## Projects
 
 - **Notes:** one free-text note per project (table `project_notes`), seen and edited by all users.

@@ -80,6 +80,11 @@ table.editing input[type=date]{min-width:120px} table.editing input[type=time]{m
 .colrow.off label{color:var(--muted)}
 #colDlg{max-width:380px}
 td.c-notes{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mailkind{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 6px}
+.mailkind label{display:flex;gap:6px;align-items:center;margin:0;color:var(--text);font-size:14px}
+.mailkind input{width:auto}
+#mailDlg{max-width:560px;width:calc(100% - 24px)}
+#mailBody{width:100%;font:inherit}
 .projnote{width:100%;min-height:70px;margin:0 0 10px;font:inherit;resize:vertical}
 .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .toolbar h2{font-size:18px;margin:0 8px 0 0}
@@ -355,6 +360,17 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     </div>
     <div class="dlg-foot"><button type="submit" class="primary" id="pl_go">Create jobs</button><button type="button" data-pclose>Cancel</button></div>
   </form>
+</dialog>
+<dialog id="mailDlg">
+  <div class="dlg-head"><h2>Tell the depot?</h2><button type="button" class="ghost" data-mclose aria-label="Close">✕</button></div>
+  <div class="dlg-body">
+    <p id="mailWhy" style="margin:0 0 10px;color:var(--muted);font-size:13px"></p>
+    <div class="mailkind" role="radiogroup" aria-label="What happened to the container"><label><input type="radio" name="mkind" value="emptied" checked> Emptied (Εκκενώθηκε)</label><label><input type="radio" name="mkind" value="filled"> Filled (Φορτώθηκε)</label></div>
+    <label for="mailTo">To</label><input id="mailTo" type="email" maxlength="200">
+    <label for="mailSubj">Subject</label><input id="mailSubj" maxlength="200">
+    <label for="mailBody">Message</label><textarea id="mailBody" rows="12" maxlength="4000"></textarea>
+  </div>
+  <div class="dlg-foot"><button type="button" class="primary" id="mailSend">Open in e-mail to send</button><button type="button" id="mailCopy">Copy text</button><div class="spacer"></div><button type="button" data-mclose>Skip</button></div>
 </dialog>
 <dialog id="colDlg">
   <div class="dlg-head"><h2 id="colTitle">Columns</h2><button type="button" class="ghost" data-colclose aria-label="Close">✕</button></div>
@@ -652,6 +668,18 @@ const DJ = (() => {
     for (const [k] of FIELDS) if (k !== "notes" && k !== "price" && !String(out[k] || "").trim() && String(slot[k] || "").trim()) out[k] = slot[k];
     return cleanJob(Object.assign(out, { id: unit.id, created: unit.created, updated: unit.updated, createdBy: unit.createdBy, updatedBy: unit.updatedBy, checklist: unit.checklist.concat(slot.checklist) }));
   }
+  // Done e-mail to the depot: only for a shipping-line container with no HCT container (George 2026-11-11)
+  const DEPOT_MAIL = "depot@hct.gr";
+  function needsDoneMail(j) { return !!String(j.shippingContainer || "").trim() && !String(j.hctContainer || "").trim(); }
+  function doneMail(j, kind, sender) {
+    const verb = kind === "filled" ? "φορτώθηκε (γέμισε)" : "εκκενώθηκε (άδειασε)", d = j.date ? j.date.split("-").reverse().join("/") : "";
+    const lines = [["Πελάτης", j.client], ["Αποστολέας", j.sender], ["Παραλήπτης", j.receiver], ["Είδος φορτίου", j.cargoType], ["Τεμάχια", j.pieces], ["Βάρος (kg)", j.weight], ["Αρ. κυκλοφορίας", j.truckPlate], ["Μεταφορέας", j.transporter], ["Έργο", j.project], ["Αναφορά", j.ref]]
+      .filter(([, v]) => String(v || "").trim()).map(([l, v]) => l + ": " + v);
+    return { to: DEPOT_MAIL, subject: "Container " + j.shippingContainer + " " + (kind === "filled" ? "φορτώθηκε" : "εκκενώθηκε"),
+      body: "Καλημέρα σας,\n\nΣας ενημερώνουμε ότι το κοντέινερ της ναυτιλιακής " + j.shippingContainer + " " + verb + (d ? " στις " + d : "") + ".\n\n" +
+        (lines.length ? lines.join("\n") + "\n\n" : "") + "Με εκτίμηση,\n" + (sender || "") };
+  }
+  function mailtoUrl(m) { return "mailto:" + m.to + "?subject=" + encodeURIComponent(m.subject) + "&body=" + encodeURIComponent(m.body.replace(/\r?\n/g, "\r\n")); }
   // Cancel a whole project: unfinished jobs become Cancelled, its empty planned loads go; Reopen undoes the first part
   function cancelPlan(jobs, project) {
     const mine = jobs.filter(j => j.project.trim() === project && !closed(j));
@@ -801,7 +829,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot, closed, cancelPlan, reopenStatus };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot, closed, cancelPlan, reopenStatus, needsDoneMail, doneMail, mailtoUrl, DEPOT_MAIL };
 })();
 
 /* ================= Supabase ================= */
@@ -1145,6 +1173,32 @@ function renderAll() {
   wireTable();
 }
 
+/* ---------- Done e-mail to the depot (from Week and Today) ---------- */
+let mailJob = null, mailEdited = false;
+function mailKind() { const r = document.querySelector('input[name=mkind]:checked'); return r ? r.value : "emptied"; }
+function fillMail() { const m = DJ.doneMail(mailJob, mailKind(), me ? (me.full_name || me.email) : ""); $("#mailSubj").value = m.subject; $("#mailBody").value = m.body; mailEdited = false; }
+function maybeDoneMail(job, wasStatus) {
+  if (!job || wasStatus === "done" || job.status !== "done" || !(ui.view === "week" || ui.view === "board") || !DJ.needsDoneMail(job)) return;
+  mailJob = Object.assign({}, job);
+  $("#mailWhy").textContent = "Container " + job.shippingContainer + " is marked Done. Edit the message if needed, then open it in your e-mail to send.";
+  $("#mailTo").value = DJ.DEPOT_MAIL; fillMail(); $("#mailDlg").showModal(); $("#mailBody").focus(); $("#mailBody").setSelectionRange(0, 0);
+}
+document.querySelectorAll('input[name=mkind]').forEach(rb => rb.onchange = () => {
+  if (mailEdited && !confirm("Rewrite the message for “" + (mailKind() === "filled" ? "Filled" : "Emptied") + "”? Your edits to it will be replaced.")) return;
+  fillMail();
+});
+["mailSubj", "mailBody"].forEach(id => $("#" + id).addEventListener("input", () => { mailEdited = true; }));
+$("#mailSend").onclick = () => {
+  const to = $("#mailTo").value.trim(); if (!/^[^\s@]+@[^\s@]+$/.test(to)) { toast("Check the e-mail address"); return; }
+  location.href = DJ.mailtoUrl({ to, subject: $("#mailSubj").value, body: $("#mailBody").value });
+  $("#mailDlg").close(); toast("Opened in your e-mail: press Send there");
+};
+$("#mailCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("#mailSubj").value + "\n\n" + $("#mailBody").value); toast("Copied: paste it into an e-mail to " + $("#mailTo").value); }
+  catch (e) { $("#mailBody").select(); toast("Press Ctrl+C to copy"); }
+};
+document.querySelectorAll("[data-mclose]").forEach(b => b.onclick = () => $("#mailDlg").close());
+
 /* ---------- column picker (All jobs, Projects): which columns, in which order; remembered in this browser ---------- */
 const COL_CATALOG = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"], ["price", "Price €"], ["invoiceNo", "Invoice no"], ["project", "Project"], ["ref", "Ref"], ["notes", "Free text"]];
 const COL_DEFAULT = {
@@ -1392,7 +1446,7 @@ function moveJob(col, id, apply) {
   const job = jobs.find(j => j.id === id); if (!job) return;
   const before = { date: job.date, time: job.time, status: job.status };
   apply(job, col); render();
-  DB.patchJob(job).catch(err => { Object.assign(job, before); render(); fail("Move not saved", err); });
+  DB.patchJob(job).then(() => maybeDoneMail(job, before.status)).catch(err => { Object.assign(job, before); render(); fail("Move not saved", err); });
 }
 let dropTarget = null; // { sel, apply } of the current view, for touch dragging
 function wireDrag(sel, apply) {
@@ -1826,7 +1880,9 @@ $("#jobForm").addEventListener("submit", async e => {
       r = await DB.saveJob(Object.assign({}, data, { id: editing }), null, true);
     }
     const queued = !editing && seesPrices() ? pendingFiles.splice(0) : [];
+    const was = editing ? (jobs.find(x => x.id === editing) || {}).status : "";
     $("#dlg").close(); toast("Saved"); await reload();
+    if (r.row) maybeDoneMail(jobs.find(x => x.id === r.row.id) || DJ.cleanJob(data), was);
     if (queued.length && r.row) await uploadMany(r.row.id, queued);
   } catch (err) { fail("Not saved", err); }
   finally { saving = false; $("#btnSave").disabled = false; }
@@ -1963,6 +2019,11 @@ function selfTest() {
   const cj = [DJ.cleanJob({ id: "a", project: "P", status: "scheduled" }), DJ.cleanJob({ id: "b", project: "P", status: "done" }), DJ.cleanJob({ id: "c", project: "P", slot: true }), DJ.cleanJob({ id: "d", project: "P", status: "cancelled" }), DJ.cleanJob({ id: "e", project: "Q" })];
   const cp = DJ.cancelPlan(cj, "P");
   ok("cancel project", cp.cancel.join() === "a" && cp.drop.join() === "c" && DJ.closed(cj[3]) && !DJ.closed(cj[0]) && DJ.applyFilters(cj, { status: "active" }).map(j => j.id).join() === "a,c,e" && DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", status: "cancelled" })], "2026-10-21").length === 0);
+  const mj = DJ.cleanJob({ shippingContainer: "MSCU1234566", client: "Πελάτης Α", date: "2026-11-11", pieces: 20 });
+  const mm = DJ.doneMail(mj, "emptied", "George"), mf = DJ.doneMail(mj, "filled", "George");
+  ok("done e-mail", DJ.needsDoneMail(mj) && !DJ.needsDoneMail(DJ.cleanJob({ shippingContainer: "MSCU1234566", hctContainer: "HCTU0000011" })) && !DJ.needsDoneMail(DJ.cleanJob({ hctContainer: "HCTU0000011" })) &&
+    mm.to === "depot@hct.gr" && mm.body.includes("MSCU1234566 εκκενώθηκε") && mm.body.includes("11/11/2026") && mm.body.includes("Τεμάχια: 20") && !mm.body.includes("Βάρος") && mf.subject.endsWith("φορτώθηκε") &&
+    DJ.mailtoUrl(mm).startsWith("mailto:depot@hct.gr?subject=") && DJ.mailtoUrl(mm).includes("%0D%0A"));
   ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&
     DJ.parseImport([["Client", "ΑΠΟΣΤΟΛΈΑΣ", "Παραλήπτης", "Date"], ["C", "Snd", "Rcv", ""]], []).jobs[0].job.receiver === "Rcv" && DJ.applyFilters([DJ.cleanJob({ sender: "X" }), DJ.cleanJob({})], { sender: "X" }).length === 1);
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");
