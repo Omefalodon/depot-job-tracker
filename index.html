@@ -672,12 +672,9 @@ const DJ = (() => {
   const DEPOT_MAIL = "depot@hct.gr";
   function needsDoneMail(j) { return !!String(j.shippingContainer || "").trim(); }
   function doneMail(j, kind, sender) {
-    const verb = kind === "filled" ? "φορτώθηκε (γέμισε)" : "εκκενώθηκε (άδειασε)", d = j.date ? j.date.split("-").reverse().join("/") : "";
-    const lines = [["Κοντέινερ HCT", j.hctContainer], ["Πελάτης", j.client], ["Αποστολέας", j.sender], ["Παραλήπτης", j.receiver], ["Είδος φορτίου", j.cargoType], ["Τεμάχια", j.pieces], ["Βάρος (kg)", j.weight], ["Αρ. κυκλοφορίας", j.truckPlate], ["Μεταφορέας", j.transporter], ["Έργο", j.project], ["Αναφορά", j.ref]]
-      .filter(([, v]) => String(v || "").trim()).map(([l, v]) => l + ": " + v);
-    return { to: DEPOT_MAIL, subject: "Container " + j.shippingContainer + " " + (kind === "filled" ? "φορτώθηκε" : "εκκενώθηκε"),
-      body: "Καλημέρα σας,\n\nΣας ενημερώνουμε ότι το κοντέινερ της ναυτιλιακής " + j.shippingContainer + " " + verb + (d ? " στις " + d : "") + ".\n\n" +
-        (lines.length ? lines.join("\n") + "\n\n" : "") + "Με εκτίμηση,\n" + (sender || "") };
+    const verb = kind === "filled" ? "φορτώθηκε" : "εκκενώθηκε";
+    return { to: DEPOT_MAIL, subject: "Κουτί " + j.shippingContainer + " " + verb,
+      body: "Καλημέρα,\n\nΑυτό είναι αυτοματοποιημένο email.\nΤο κουτί " + j.shippingContainer + " " + verb + ".\nΤο έστειλε: " + (sender || "") };
   }
   function mailtoUrl(m) { return "mailto:" + m.to + "?subject=" + encodeURIComponent(m.subject) + "&body=" + encodeURIComponent(m.body.replace(/\r?\n/g, "\r\n")); }
   // Cancel a whole project: unfinished jobs become Cancelled, its empty planned loads go; Reopen undoes the first part
@@ -2033,7 +2030,7 @@ function selfTest() {
   const mj = DJ.cleanJob({ shippingContainer: "MSCU1234566", client: "Πελάτης Α", date: "2026-11-11", pieces: 20 });
   const mm = DJ.doneMail(mj, "emptied", "George"), mf = DJ.doneMail(mj, "filled", "George");
   ok("done e-mail", DJ.needsDoneMail(mj) && DJ.needsDoneMail(DJ.cleanJob({ shippingContainer: "MSCU1234566", hctContainer: "HCTU0000011" })) && !DJ.needsDoneMail(DJ.cleanJob({ hctContainer: "HCTU0000011" })) &&
-    mm.to === "depot@hct.gr" && mm.body.includes("MSCU1234566 εκκενώθηκε") && mm.body.includes("11/11/2026") && mm.body.includes("Τεμάχια: 20") && !mm.body.includes("Βάρος") && mf.subject.endsWith("φορτώθηκε") &&
+    mm.to === "depot@hct.gr" && mm.body === "Καλημέρα,\n\nΑυτό είναι αυτοματοποιημένο email.\nΤο κουτί MSCU1234566 εκκενώθηκε.\nΤο έστειλε: George" && mf.subject === "Κουτί MSCU1234566 φορτώθηκε" &&
     DJ.mailtoUrl(mm).startsWith("mailto:depot@hct.gr?subject=") && DJ.mailtoUrl(mm).includes("%0D%0A"));
   ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&
     DJ.parseImport([["Client", "ΑΠΟΣΤΟΛΈΑΣ", "Παραλήπτης", "Date"], ["C", "Snd", "Rcv", ""]], []).jobs[0].job.receiver === "Rcv" && DJ.applyFilters([DJ.cleanJob({ sender: "X" }), DJ.cleanJob({})], { sender: "X" }).length === 1);

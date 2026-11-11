@@ -224,12 +224,12 @@ log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.a
   await G.evaluate(() => { window.__mail = null; DJ.mailtoUrl = m => { window.__mail = m; return '#'; }; return reload(); });
   await G.click('nav [data-view=board]'); await G.click('#bToday'); await G.waitForTimeout(300);
   await G.locator('#main .card[data-id=mail2]').dragTo(G.locator('.col[data-status=done]')); await G.waitForTimeout(600);
-  log('done mail, with HCT container too:', await G.isVisible('#mailDlg'), '| HCT line:', (await G.inputValue('#mailBody')).includes('Κοντέινερ HCT: HCTU0000011')); await G.click('#mailDlg [data-mclose]');
+  log('done mail, with HCT container too:', await G.isVisible('#mailDlg'), '| body:', JSON.stringify(await G.inputValue('#mailBody'))); await G.click('#mailDlg [data-mclose]');
   await G.locator('#main .card[data-id=mail1]').dragTo(G.locator('.col[data-status=done]')); await G.waitForTimeout(600);
   log('done mail popup:', await G.isVisible('#mailDlg'), '| to:', await G.inputValue('#mailTo'), '| subject:', await G.inputValue('#mailSubj'), '| greek body:', (await G.inputValue('#mailBody')).split('\n')[2]);
   await G.fill('#mailBody', (await G.inputValue('#mailBody')) + '\nΕυχαριστώ'); await G.check('input[name=mkind][value=filled]'); await G.waitForTimeout(150);
   log('filled rewrite (after confirm):', await G.inputValue('#mailSubj'));
-  await G.fill('#mailBody', (await G.inputValue('#mailBody')).replace('Με εκτίμηση', 'Φιλικά')); await G.click('#mailSend'); await G.waitForTimeout(200);
+  await G.fill('#mailBody', (await G.inputValue('#mailBody')).replace('Καλημέρα', 'Φιλικά')); await G.click('#mailSend'); await G.waitForTimeout(200);
   const sent = await G.evaluate(() => window.__mail);
   log('send:', sent && sent.to, '| edited text kept:', !!sent && sent.body.includes('Φιλικά'), '| popup closed:', !(await G.isVisible('#mailDlg')));
   fnConfigured = true;
