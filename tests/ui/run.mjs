@@ -213,6 +213,18 @@ await G.click('#navSug .navbadge'); await G.locator('.sug [data-vote]').first().
 await G.selectOption('.sug [data-status]', 'planned'); await G.waitForTimeout(500); await G.fill('.sug [data-note]', 'Next week'); await G.locator('.sug [data-note]').press('Tab'); await G.waitForTimeout(600);
 await M.waitForTimeout(400); await M.locator('.sug [data-vote]').first().click(); await M.waitForTimeout(600);
 log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.admin_note])), '| votes:', db.suggestion_votes.length, '| maria sees reply:', (await M.textContent('.sug')).includes('Next week'), '| maria has status menu:', await M.locator('.sug [data-status]').count()); await G.screenshot({ path: new URL('./g-sug.png', import.meta.url).pathname });
+// Column picker on All jobs: hide Sender, move Client first, add Free text; remembered after reload; reset
+await G.click('nav [data-view=all]'); await G.click('#colBtn'); await G.waitForTimeout(150);
+const colRow = name => G.locator('#colList .colrow').filter({ hasText: name });
+await colRow('Sender').locator('input').uncheck();
+for (let i = 0; i < 3; i++) await colRow('Client').locator('[data-up]').click();
+await colRow('Free text').locator('input').check();
+await G.click('#colDlg [data-colclose].primary');
+const heads = async () => (await G.locator('#main thead th').allTextContents()).map(t => t.replace(/[▲▼]/g, '').trim());
+const h1 = await heads(); const stored = await G.evaluate(() => JSON.parse(localStorage.getItem('depotJobTracker.ui')).cols.all); await G.click('nav [data-view=week]'); await G.click('nav [data-view=all]'); const h2 = await heads();
+log('columns:', h1.slice(0, 3).join(','), '| sender shown:', h1.includes('Sender'), '| free text:', h1.includes('Free text'), '| remembered:', JSON.stringify(h1) === JSON.stringify(h2) && stored[0] === 'client');
+await G.click('#colBtn'); await G.click('#colReset'); await G.click('#colDlg [data-colclose].primary'); log('reset:', (await heads()).slice(0, 4).join(','));
+await G.click('nav [data-view=projects]'); await G.click('#colBtn'); log('projects picker:', await G.textContent('#colTitle'), (await G.locator('#colList input:checked').count())); await G.click('#colDlg [data-colclose].primary');
 // Projects: notes, edit in table, cancel the whole project and reopen it
 const projName = slotJob.project;
 await G.click('nav [data-view=projects]'); await G.locator('.plist [data-p="' + projName + '"]').click(); await G.waitForTimeout(200);

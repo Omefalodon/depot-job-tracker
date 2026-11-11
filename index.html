@@ -74,6 +74,12 @@ table.editing input[type=date]{min-width:120px} table.editing input[type=time]{m
 .edtoggle input{width:auto}
 .plist button.archived span:first-child{color:var(--muted)}
 .archnote{margin:0 0 10px;color:var(--muted);font-size:13px}
+.colrow{display:flex;align-items:center;gap:4px;padding:3px 0;border-bottom:1px solid var(--border)}
+.colrow label{flex:1;display:flex;gap:8px;align-items:center;margin:0;color:var(--text);font-size:14px;cursor:pointer}
+.colrow label input{width:auto}
+.colrow.off label{color:var(--muted)}
+#colDlg{max-width:380px}
+td.c-notes{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .projnote{width:100%;min-height:70px;margin:0 0 10px;font:inherit;resize:vertical}
 .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .toolbar h2{font-size:18px;margin:0 8px 0 0}
@@ -349,6 +355,11 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     </div>
     <div class="dlg-foot"><button type="submit" class="primary" id="pl_go">Create jobs</button><button type="button" data-pclose>Cancel</button></div>
   </form>
+</dialog>
+<dialog id="colDlg">
+  <div class="dlg-head"><h2 id="colTitle">Columns</h2><button type="button" class="ghost" data-colclose aria-label="Close">✕</button></div>
+  <div class="dlg-body"><p style="margin:0 0 8px;color:var(--muted);font-size:13px">Tick the columns to show, and use ▲ ▼ to change their order. Changes show straight away and are remembered on this computer.</p><div id="colList"></div></div>
+  <div class="dlg-foot"><button type="button" class="primary" data-colclose>Done</button><div class="spacer"></div><button type="button" id="colReset">Reset to default</button></div>
 </dialog>
 <dialog id="impDlg">
   <div class="dlg-head"><h2>Import jobs from Excel</h2><button type="button" class="ghost" data-iclose aria-label="Close">✕</button></div>
@@ -1120,9 +1131,9 @@ function renderAll() {
   const q = $("#search").value;
   const list = DJ.sortJobs(DJ.applyFilters(jobs.filter(j => DJ.matches(j, q)), ui.fAll), ui.sort, ui.sortDir);
   const k = ui.sort, dir = ui.sortDir;
-  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"]].concat(seesPrices() ? [["price", "Price €"], ["invoiceNo", "Invoice no"]] : []).concat([["project", "Project"], ["ref", "Ref"]]);
+  const cols = colsFor("all");
   $("#main").innerHTML =
-    '<div class="toolbar"><h2>All jobs</h2><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle() + '<div class="spacer"></div>' +
+    '<div class="toolbar"><h2>All jobs</h2><span class="m" style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle("all") + '<div class="spacer"></div>' +
     '<button id="tplBtn" title="Excel file with all the job columns, to fill in and import">⬇ Excel template</button><button id="impBtn" title="Create many jobs at once from a filled-in template">⬆ Import from Excel</button><button id="exportAll">Export to Excel</button></div>' +
     filterBar(ui.fAll, false) +
     (list.length ? jobTable(list, cols, q, true) : '<div class="empty">No jobs here yet. Click “+ New job”, or ⋯ › Load demo data.</div>');
@@ -1134,8 +1145,50 @@ function renderAll() {
   wireTable();
 }
 
+/* ---------- column picker (All jobs, Projects): which columns, in which order; remembered in this browser ---------- */
+const COL_CATALOG = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["sender", "Sender"], ["receiver", "Receiver"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["transporter", "Transporter"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"], ["price", "Price €"], ["invoiceNo", "Invoice no"], ["project", "Project"], ["ref", "Ref"], ["notes", "Free text"]];
+const COL_DEFAULT = {
+  all: ["date", "time", "status", "client", "sender", "receiver", "shippingContainer", "hctContainer", "truckPlate", "transporter", "cargoType", "weight", "pieces", "price", "invoiceNo", "project", "ref"],
+  projects: ["date", "time", "status", "client", "shippingContainer", "hctContainer", "truckPlate", "cargoType", "weight", "pieces", "ref"]
+};
+const PRICE_COLS = ["price", "invoiceNo"];
+function colOrder(view) { // every column, visible ones first in the chosen order
+  const known = COL_CATALOG.map(c => c[0]).filter(k => seesPrices() || !PRICE_COLS.includes(k));
+  const saved = ui.cols && Array.isArray(ui.cols[view]) ? ui.cols[view].filter(k => known.includes(k)) : null;
+  const shown = saved && saved.length ? saved : COL_DEFAULT[view].filter(k => known.includes(k));
+  return { shown, all: shown.concat(known.filter(k => !shown.includes(k))) };
+}
+function colsFor(view) { const lbl = Object.fromEntries(COL_CATALOG); return colOrder(view).shown.map(k => [k, lbl[k]]); }
+let colView = null, colDraft = null;
+function openColumns(view) {
+  const o = colOrder(view); colView = view;
+  colDraft = o.all.map(k => ({ k, on: o.shown.includes(k) }));
+  $("#colTitle").textContent = "Columns · " + (view === "all" ? "All jobs" : "Projects");
+  renderColList(); $("#colDlg").showModal();
+}
+function renderColList() {
+  const lbl = Object.fromEntries(COL_CATALOG);
+  $("#colList").innerHTML = colDraft.map((c, i) => '<div class="colrow' + (c.on ? '' : ' off') + '"><label><input type="checkbox" data-ci="' + i + '"' + (c.on ? ' checked' : '') + '>' + esc(lbl[c.k]) + '</label>' +
+    '<button type="button" class="ghost" data-up="' + i + '"' + (i ? '' : ' disabled') + ' aria-label="Move ' + esc(lbl[c.k]) + ' up" title="Move up">▲</button>' +
+    '<button type="button" class="ghost" data-down="' + i + '"' + (i < colDraft.length - 1 ? '' : ' disabled') + ' aria-label="Move ' + esc(lbl[c.k]) + ' down" title="Move down">▼</button></div>').join("");
+}
+function applyColumns() {
+  const shown = colDraft.filter(c => c.on).map(c => c.k);
+  ui.cols = Object.assign({}, ui.cols, { [colView]: shown.length ? shown : null }); saveUi(); render();
+}
+$("#colList").addEventListener("change", e => { const i = e.target.dataset.ci; if (i == null) return; colDraft[+i].on = e.target.checked; if (!colDraft.some(c => c.on)) { colDraft[+i].on = true; toast("Keep at least one column"); } renderColList(); applyColumns(); });
+$("#colList").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const i = +(b.dataset.up ?? b.dataset.down), j = b.dataset.up != null ? i - 1 : i + 1;
+  if (j < 0 || j >= colDraft.length) return;
+  [colDraft[i], colDraft[j]] = [colDraft[j], colDraft[i]]; renderColList(); applyColumns();
+  const again = $("#colList").querySelector(b.dataset.up != null ? '[data-up="' + j + '"]' : '[data-down="' + j + '"]'); if (again && !again.disabled) again.focus();
+});
+$("#colReset").onclick = () => { ui.cols = Object.assign({}, ui.cols, { [colView]: null }); saveUi(); render(); openColumns(colView); };
+document.querySelectorAll("[data-colclose]").forEach(b => b.onclick = () => $("#colDlg").close());
+
 /* ---------- job tables (All jobs, Projects), optionally editable in place ---------- */
-function editToggle() { return '<label class="edtoggle" title="Change jobs straight in the table; each cell saves when you leave it"><input type="checkbox" id="edToggle"' + (ui.tableEdit ? ' checked' : '') + '>✎ Edit in table</label>'; }
+function editToggle(view) { return '<button type="button" id="colBtn" data-colview="' + view + '" title="Choose which columns show, and their order">☰ Columns</button><label class="edtoggle" title="Change jobs straight in the table; each cell saves when you leave it"><input type="checkbox" id="edToggle"' + (ui.tableEdit ? ' checked' : '') + '>✎ Edit in table</label>'; }
 function editCell(j, c) {
   const a = ' data-ek="' + c + '" data-id="' + esc(j.id) + '" aria-label="' + esc(c) + '"';
   if (c === "status") return '<select' + a + '>' + DJ.STATUSES.map(s => '<option value="' + s + '"' + (j.status === s ? ' selected' : '') + '>' + DJ.STATUS_LABEL[s] + '</option>').join("") + '</select>';
@@ -1143,16 +1196,17 @@ function editCell(j, c) {
   return '<input type="' + type + '"' + a + ' value="' + esc(j[c] == null ? "" : j[c]) + '"' + (type === "number" ? ' min="0" step="' + (c === "price" ? "0.01" : "1") + '"' : type === "text" ? ' maxlength="120"' : '') + '>';
 }
 // Planned loads keep only date, time and status editable here; their container is picked in the job editor
-const editable = (j, c) => c !== "invoiceNo" && (!j.slot || c === "date" || c === "time" || c === "status");
+const editable = (j, c) => c !== "invoiceNo" && c !== "notes" && (!j.slot || c === "date" || c === "time" || c === "status");
 function jobTable(list, cols, q, sortable) {
   const ed = !!ui.tableEdit, dir = ui.sortDir;
   return '<div class="tablewrap"><table' + (ed ? ' class="editing"' : '') + '><thead><tr>' + cols.map(([c, l]) => '<th' + (sortable ? ' data-sort="' + c + '"' : '') + '>' + l + (sortable && ui.sort === c ? (dir > 0 ? " ▲" : " ▼") : "") + '</th>').join("") + '<th>☑</th></tr></thead><tbody>' +
-    list.map(j => '<tr class="row' + (j.status === "cancelled" ? ' cancelled' : '') + '" data-id="' + esc(j.id) + '">' + cols.map(([c]) => '<td>' + (ed && editable(j, c) ? editCell(j, c)
+    list.map(j => '<tr class="row' + (j.status === "cancelled" ? ' cancelled' : '') + '" data-id="' + esc(j.id) + '">' + cols.map(([c]) => '<td' + (c === "notes" ? ' class="c-notes" title="' + esc(j.notes) + '"' : '') + '>' + (ed && editable(j, c) ? editCell(j, c)
       : c === "status" ? pill(j.status) : c === "date" ? esc(j.date ? fmtDate(j.date) : "—") : (c === "weight" || c === "pieces") && j[c] ? esc(Number(j[c]).toLocaleString()) : c === "price" && j.price !== "" ? esc(Number(j.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : hl(j[c], q)) + '</td>').join("") +
       '<td>' + (ed ? '<button type="button" class="ghost" data-openjob title="Open the whole job" aria-label="Open job">✎</button> ' : '') + progress(j) + '</td></tr>').join("") +
     '</tbody></table></div>';
 }
 function wireTable() {
+  const cb = $("#colBtn"); if (cb) cb.onclick = () => openColumns(cb.dataset.colview);
   const t = $("#edToggle"); if (t) t.onchange = () => { ui.tableEdit = t.checked; saveUi(); render(); };
   $("#main").querySelectorAll("[data-ek]").forEach(el => el.addEventListener("change", () => saveCell(el)));
   $("#main").querySelectorAll("[data-openjob]").forEach(b => b.onclick = () => openEditor(b.closest("tr").dataset.id));
@@ -1240,11 +1294,11 @@ function renderProjects() {
   const list = sel === null ? [] : jobs.filter(j => j.project.trim() === sel && DJ.matches(j, q)).sort(byDate);
   const count = n => jobs.filter(j => j.project.trim() === n && !DJ.closed(j)).length + "/" + jobs.filter(j => j.project.trim() === n).length;
   const plan = sel ? DJ.cancelPlan(jobs, sel) : { cancel: [], drop: [] }, nCancelled = sel ? jobs.filter(j => j.project.trim() === sel && j.status === "cancelled").length : 0;
-  const cols = [["date", "Date"], ["time", "Time"], ["status", "Status"], ["client", "Client"], ["shippingContainer", "Shipping cont."], ["hctContainer", "HCT cont."], ["truckPlate", "Truck"], ["cargoType", "Cargo"], ["weight", "Weight"], ["pieces", "Pieces"], ["ref", "Ref"]];
+  const cols = colsFor("projects");
   $("#main").innerHTML = '<div class="projects"><div class="plist"><div class="toolbar"><h2>Projects</h2><div class="spacer"></div><button id="planBtn" title="Create a number of loads per day for a project, details filled in later">+ Plan loads</button></div>' +
     (nArch ? '<label class="edtoggle" style="margin:0 0 8px"><input type="checkbox" id="showArch"' + (ui.showArchived ? ' checked' : '') + '>Show archived (' + nArch + ')</label>' : '') +
     (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + (archived.has(n) ? ' archived' : '') + '"><span>' + (archived.has(n) ? '🗄 ' : '') + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
-    '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle() + '<div class="spacer"></div>' +
+    '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle("projects") + '<div class="spacer"></div>' +
       (sel && plan.cancel.length + plan.drop.length ? '<button id="cancelProj" class="danger" title="Mark every unfinished job of this project Cancelled and remove its empty planned loads">Cancel project</button>' : '') +
       (nCancelled ? '<button id="reopenProj" title="Set the cancelled jobs of this project back to Open / Scheduled">Reopen cancelled (' + nCancelled + ')</button>' : '') +
       (sel && seesPrices() ? (archived.has(sel) ? '<button id="archProj" title="Show this project in the lists again">Unarchive</button>' : '<button id="archProj" title="Finished: hide this project from the project list, suggestions and the side panel. Nothing is deleted.">Archive</button>') : '') +
