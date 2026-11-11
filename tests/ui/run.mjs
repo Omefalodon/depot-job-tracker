@@ -28,6 +28,7 @@ function handle(page, st) {
     if (objects[st.path]) return { data: null, error: { message: "The resource already exists" } };
     objects[st.path] = { size: st.size, contentType: st.contentType }; return { data: { path: st.path }, error: null };
   }
+  if (st.op === "fn") { if (!r) return { data: null, error: { error: "not allowed" } }; if (!fnConfigured) return { data: null, error: { error: "not_configured" } }; if (!/@hct\.gr$/i.test(st.body.to)) return { data: null, error: { error: "Only @hct.gr addresses can be sent to" } }; sentMail.push(st.body); return { data: { ok: true }, error: null }; }
   if (st.op === "remove") { if (pr) for (const k of st.paths) delete objects[k]; return { data: [], error: null }; }
   if (st.op === "sign") { if (!pr || !objects[st.path]) return { data: null, error: { message: "Object not found" } }; return { data: { signedUrl: "https://files.test/sign/" + st.path + (st.download ? "?download=" + encodeURIComponent(st.download) : "") }, error: null }; }
   const allowed = st.table === "profiles" ? true : (st.table === "job_prices" || st.table === "job_files" || st.table === "job_invoices") ? pr : !!r;
@@ -43,6 +44,7 @@ function handle(page, st) {
   const data = JSON.parse(JSON.stringify(out));
   return { data: st.single ? (data[0] || null) : data, error: null };
 }
+let fnConfigured = false; const sentMail = [];
 const b = await chromium.launch();
 async function open(name, phone) {
   const ctx = await b.newContext(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 1450, height: 900 } });
@@ -222,7 +224,7 @@ log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.a
   await G.evaluate(() => { window.__mail = null; DJ.mailtoUrl = m => { window.__mail = m; return '#'; }; return reload(); });
   await G.click('nav [data-view=board]'); await G.click('#bToday'); await G.waitForTimeout(300);
   await G.locator('#main .card[data-id=mail2]').dragTo(G.locator('.col[data-status=done]')); await G.waitForTimeout(600);
-  log('done mail, with HCT container:', await G.isVisible('#mailDlg'));
+  log('done mail, with HCT container too:', await G.isVisible('#mailDlg'), '| HCT line:', (await G.inputValue('#mailBody')).includes('Κοντέινερ HCT: HCTU0000011')); await G.click('#mailDlg [data-mclose]');
   await G.locator('#main .card[data-id=mail1]').dragTo(G.locator('.col[data-status=done]')); await G.waitForTimeout(600);
   log('done mail popup:', await G.isVisible('#mailDlg'), '| to:', await G.inputValue('#mailTo'), '| subject:', await G.inputValue('#mailSubj'), '| greek body:', (await G.inputValue('#mailBody')).split('\n')[2]);
   await G.fill('#mailBody', (await G.inputValue('#mailBody')) + '\nΕυχαριστώ'); await G.check('input[name=mkind][value=filled]'); await G.waitForTimeout(150);
@@ -230,6 +232,12 @@ log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.a
   await G.fill('#mailBody', (await G.inputValue('#mailBody')).replace('Με εκτίμηση', 'Φιλικά')); await G.click('#mailSend'); await G.waitForTimeout(200);
   const sent = await G.evaluate(() => window.__mail);
   log('send:', sent && sent.to, '| edited text kept:', !!sent && sent.body.includes('Φιλικά'), '| popup closed:', !(await G.isVisible('#mailDlg')));
+  fnConfigured = true;
+  await G.evaluate(() => { const j = jobs.find(x => x.id === 'mail1'); j.status = 'in-progress'; maybeDoneMail(Object.assign({}, j, { status: 'done' }), 'in-progress'); });
+  await G.fill('#mailTo', 'someone@gmail.com'); await G.click('#mailSend'); await G.waitForTimeout(300);
+  log('outside hct.gr refused:', sentMail.length === 0, '| popup still open:', await G.isVisible('#mailDlg'));
+  await G.fill('#mailTo', 'depot@hct.gr'); await G.click('#mailSend'); await G.waitForTimeout(300);
+  log('sent by app:', sentMail.length, sentMail[0] && sentMail[0].to, '| greek subject:', sentMail[0] && sentMail[0].subject, '| closed:', !(await G.isVisible('#mailDlg')));
   await G.click('nav [data-view=all]'); await G.evaluate(() => openEditor('mail2')); await G.selectOption('#f_status', 'in-progress'); await G.click('#btnSave'); await G.waitForTimeout(500);
   await G.evaluate(() => openEditor('mail1')); await G.selectOption('#f_status', 'in-progress'); await G.click('#btnSave'); await G.waitForTimeout(500);
   await G.evaluate(() => openEditor('mail1')); await G.selectOption('#f_status', 'done'); await G.click('#btnSave'); await G.waitForTimeout(600);

@@ -37,7 +37,7 @@ Touch screens have no mouse drag, so tiles drag after a short hold (about a thir
 
 ## Done e-mail to the depot
 
-When a job with a shipping-line container and no HCT container is marked Done from Week or Today (drag to Done, or the editor), a popup offers an editable Greek message to depot@hct.gr (Emptied / Filled). For now **Open in e-mail to send** hands it to the user's own e-mail app (mailto); sending straight from the app needs a mail service and a Supabase Edge Function (not set up yet).
+When a job with a shipping-line container is marked Done from Week or Today (drag to Done, or the editor), a popup offers an editable Greek message to depot@hct.gr (Emptied / Filled). **Send** calls the Edge Function `send-depot-mail` (supabase/functions), which sends through the hct.gr Google Workspace (smtp.gmail.com:465) with the secrets `SMTP_USER` / `SMTP_PASS` (an app password, set in the Supabase dashboard, never in code). It only accepts signed-in active users and @hct.gr recipients, and sets Reply-To to the user. Until the secrets exist it answers `not_configured` and the app opens the user's own e-mail app instead.
 
 ## Projects
 

@@ -370,7 +370,7 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
     <label for="mailSubj">Subject</label><input id="mailSubj" maxlength="200">
     <label for="mailBody">Message</label><textarea id="mailBody" rows="12" maxlength="4000"></textarea>
   </div>
-  <div class="dlg-foot"><button type="button" class="primary" id="mailSend">Open in e-mail to send</button><button type="button" id="mailCopy">Copy text</button><div class="spacer"></div><button type="button" data-mclose>Skip</button></div>
+  <div class="dlg-foot"><button type="button" class="primary" id="mailSend">Send</button><button type="button" id="mailCopy">Copy text</button><div class="spacer"></div><button type="button" data-mclose>Skip</button></div>
 </dialog>
 <dialog id="colDlg">
   <div class="dlg-head"><h2 id="colTitle">Columns</h2><button type="button" class="ghost" data-colclose aria-label="Close">✕</button></div>
@@ -668,12 +668,12 @@ const DJ = (() => {
     for (const [k] of FIELDS) if (k !== "notes" && k !== "price" && !String(out[k] || "").trim() && String(slot[k] || "").trim()) out[k] = slot[k];
     return cleanJob(Object.assign(out, { id: unit.id, created: unit.created, updated: unit.updated, createdBy: unit.createdBy, updatedBy: unit.updatedBy, checklist: unit.checklist.concat(slot.checklist) }));
   }
-  // Done e-mail to the depot: only for a shipping-line container with no HCT container (George 2026-11-11)
+  // Done e-mail to the depot: whenever the job has a shipping-line container (George 2026-11-11)
   const DEPOT_MAIL = "depot@hct.gr";
-  function needsDoneMail(j) { return !!String(j.shippingContainer || "").trim() && !String(j.hctContainer || "").trim(); }
+  function needsDoneMail(j) { return !!String(j.shippingContainer || "").trim(); }
   function doneMail(j, kind, sender) {
     const verb = kind === "filled" ? "φορτώθηκε (γέμισε)" : "εκκενώθηκε (άδειασε)", d = j.date ? j.date.split("-").reverse().join("/") : "";
-    const lines = [["Πελάτης", j.client], ["Αποστολέας", j.sender], ["Παραλήπτης", j.receiver], ["Είδος φορτίου", j.cargoType], ["Τεμάχια", j.pieces], ["Βάρος (kg)", j.weight], ["Αρ. κυκλοφορίας", j.truckPlate], ["Μεταφορέας", j.transporter], ["Έργο", j.project], ["Αναφορά", j.ref]]
+    const lines = [["Κοντέινερ HCT", j.hctContainer], ["Πελάτης", j.client], ["Αποστολέας", j.sender], ["Παραλήπτης", j.receiver], ["Είδος φορτίου", j.cargoType], ["Τεμάχια", j.pieces], ["Βάρος (kg)", j.weight], ["Αρ. κυκλοφορίας", j.truckPlate], ["Μεταφορέας", j.transporter], ["Έργο", j.project], ["Αναφορά", j.ref]]
       .filter(([, v]) => String(v || "").trim()).map(([l, v]) => l + ": " + v);
     return { to: DEPOT_MAIL, subject: "Container " + j.shippingContainer + " " + (kind === "filled" ? "φορτώθηκε" : "εκκενώθηκε"),
       body: "Καλημέρα σας,\n\nΣας ενημερώνουμε ότι το κοντέινερ της ναυτιλιακής " + j.shippingContainer + " " + verb + (d ? " στις " + d : "") + ".\n\n" +
@@ -1188,10 +1188,21 @@ document.querySelectorAll('input[name=mkind]').forEach(rb => rb.onchange = () =>
   fillMail();
 });
 ["mailSubj", "mailBody"].forEach(id => $("#" + id).addEventListener("input", () => { mailEdited = true; }));
-$("#mailSend").onclick = () => {
-  const to = $("#mailTo").value.trim(); if (!/^[^\s@]+@[^\s@]+$/.test(to)) { toast("Check the e-mail address"); return; }
-  location.href = DJ.mailtoUrl({ to, subject: $("#mailSubj").value, body: $("#mailBody").value });
-  $("#mailDlg").close(); toast("Opened in your e-mail: press Send there");
+// Sent by the app (Edge Function send-depot-mail, through the hct.gr Google Workspace); until that is set up, the user's own e-mail app opens instead
+$("#mailSend").onclick = async () => {
+  const m = { to: $("#mailTo").value.trim(), subject: $("#mailSubj").value.trim(), body: $("#mailBody").value };
+  if (!/^[^\s@]+@[^\s@]+$/.test(m.to)) { toast("Check the e-mail address"); return; }
+  if (!m.subject || !m.body.trim()) { toast("Fill in the subject and the message"); return; }
+  const btn = $("#mailSend"); btn.disabled = true; btn.textContent = "Sending…";
+  let err = null;
+  try {
+    const { error } = await sb.functions.invoke("send-depot-mail", { body: { to: m.to, subject: m.subject, text: m.body } });
+    if (error) { err = { message: error.message }; try { err = await error.context.json(); } catch (e) { } }
+  } catch (e) { err = { message: String(e && e.message || e) }; }
+  btn.disabled = false; btn.textContent = "Send";
+  if (!err) { $("#mailDlg").close(); toast("Sent to " + m.to); return; }
+  if (err.error === "not_configured") { location.href = DJ.mailtoUrl(m); $("#mailDlg").close(); toast("Sending from the app isn't set up yet, so it opened in your e-mail: press Send there"); return; }
+  toast("Not sent: " + (err.error || err.message || "unknown error") + ". You can try again or use Copy text.");
 };
 $("#mailCopy").onclick = async () => {
   try { await navigator.clipboard.writeText($("#mailSubj").value + "\n\n" + $("#mailBody").value); toast("Copied: paste it into an e-mail to " + $("#mailTo").value); }
@@ -2021,7 +2032,7 @@ function selfTest() {
   ok("cancel project", cp.cancel.join() === "a" && cp.drop.join() === "c" && DJ.closed(cj[3]) && !DJ.closed(cj[0]) && DJ.applyFilters(cj, { status: "active" }).map(j => j.id).join() === "a,c,e" && DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", status: "cancelled" })], "2026-10-21").length === 0);
   const mj = DJ.cleanJob({ shippingContainer: "MSCU1234566", client: "Πελάτης Α", date: "2026-11-11", pieces: 20 });
   const mm = DJ.doneMail(mj, "emptied", "George"), mf = DJ.doneMail(mj, "filled", "George");
-  ok("done e-mail", DJ.needsDoneMail(mj) && !DJ.needsDoneMail(DJ.cleanJob({ shippingContainer: "MSCU1234566", hctContainer: "HCTU0000011" })) && !DJ.needsDoneMail(DJ.cleanJob({ hctContainer: "HCTU0000011" })) &&
+  ok("done e-mail", DJ.needsDoneMail(mj) && DJ.needsDoneMail(DJ.cleanJob({ shippingContainer: "MSCU1234566", hctContainer: "HCTU0000011" })) && !DJ.needsDoneMail(DJ.cleanJob({ hctContainer: "HCTU0000011" })) &&
     mm.to === "depot@hct.gr" && mm.body.includes("MSCU1234566 εκκενώθηκε") && mm.body.includes("11/11/2026") && mm.body.includes("Τεμάχια: 20") && !mm.body.includes("Βάρος") && mf.subject.endsWith("φορτώθηκε") &&
     DJ.mailtoUrl(mm).startsWith("mailto:depot@hct.gr?subject=") && DJ.mailtoUrl(mm).includes("%0D%0A"));
   ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&

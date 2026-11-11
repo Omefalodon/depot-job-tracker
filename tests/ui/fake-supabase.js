@@ -26,6 +26,7 @@ var supabase = { createClient() {
   }; } };
   return {
     from, storage,
+    functions: { async invoke(name, opts) { const r = await call({ op: "fn", name, body: opts && opts.body }); return r.error ? { data: null, error: { message: "Edge Function returned a non-2xx status code", context: { json: async () => r.error } } } : { data: r.data, error: null }; } },
     auth: {
       async signInWithPassword({ email, password }) { const r = JSON.parse(await window.__db(JSON.stringify({ op: "login", email, password }))); if (r.error) return r; session = { user: r.user }; fire("SIGNED_IN"); return { data: { session }, error: null }; },
       async signOut() { await window.__db(JSON.stringify({ op: "logout" })); session = null; fire("SIGNED_OUT"); return { error: null }; },
