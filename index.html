@@ -10,17 +10,17 @@
 :root{
   --bg:#f4f5f7; --surface:#ffffff; --surface2:#eef0f3; --border:#d9dde3; --text:#1d2330; --muted:#5f6b7a;
   --accent:#1f6feb; --accent-weak:#e3edfd; --danger:#c62828; --warn:#a15c00; --warn-bg:#fff4e0;
-  --s-open:#6b7280; --s-scheduled:#1f6feb; --s-progress:#b26a00; --s-done:#2e7d32;
+  --s-open:#1f6feb; --s-scheduled:#1f6feb; --s-progress:#b26a00; --s-papers:#7c3aed; --s-done:#2e7d32;
 }
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
   --bg:#14171c; --surface:#1d2128; --surface2:#262b33; --border:#343a44; --text:#e6e9ee; --muted:#9aa4b2;
   --accent:#5b9bff; --accent-weak:#1e2d47; --danger:#ff6b6b; --warn:#f0b35a; --warn-bg:#3a2c12;
-  --s-open:#9aa4b2; --s-scheduled:#5b9bff; --s-progress:#f0b35a; --s-done:#66bb6a;
+  --s-open:#5b9bff; --s-scheduled:#5b9bff; --s-progress:#f0b35a; --s-papers:#b794f6; --s-done:#66bb6a;
 }}
 :root[data-theme="dark"]{
   --bg:#14171c; --surface:#1d2128; --surface2:#262b33; --border:#343a44; --text:#e6e9ee; --muted:#9aa4b2;
   --accent:#5b9bff; --accent-weak:#1e2d47; --danger:#ff6b6b; --warn:#f0b35a; --warn-bg:#3a2c12;
-  --s-open:#9aa4b2; --s-scheduled:#5b9bff; --s-progress:#f0b35a; --s-done:#66bb6a;
+  --s-open:#5b9bff; --s-scheduled:#5b9bff; --s-progress:#f0b35a; --s-papers:#b794f6; --s-done:#66bb6a;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -62,10 +62,10 @@ aside.tdhide{visibility:hidden}
 .card .t{font-weight:600;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;justify-content:space-between}
 .card .m{color:var(--muted);font-size:12px}
 .card .prog{font-size:11px;color:var(--muted)}
-.st-open{border-left-color:var(--s-open)} .st-scheduled{border-left-color:var(--s-scheduled)}
+.st-open{border-left-color:var(--s-open)} .st-papers{border-left-color:var(--s-papers)}
 .st-in-progress{border-left-color:var(--s-progress)} .st-done{border-left-color:var(--s-done)} .st-cancelled{border-left-color:var(--muted);opacity:.7}
 .pill{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid currentColor;white-space:nowrap;font-weight:600}
-.p-open{color:var(--s-open)} .p-scheduled{color:var(--s-scheduled)} .p-in-progress{color:var(--s-progress)} .p-done{color:var(--s-done)} .p-cancelled{color:var(--muted)}
+.p-open{color:var(--s-open)} .p-papers{color:var(--s-papers)} .p-in-progress{color:var(--s-progress)} .p-done{color:var(--s-done)} .p-cancelled{color:var(--muted)}
 tr.row.cancelled td{color:var(--muted)}
 table.editing td{padding:2px}
 table.editing input,table.editing select{width:100%;min-width:70px;padding:3px 4px;font-size:12px}
@@ -120,7 +120,7 @@ tr.row{cursor:pointer} tr.row:hover td{background:var(--accent-weak)}
 .wx .ic{font-size:16px;vertical-align:-2px}
 .wx.alert{color:var(--warn);font-weight:600}
 .daynote{margin:0;min-height:70px;font-size:12px;resize:vertical;background:var(--surface)}
-.board{display:grid;grid-template-columns:repeat(4,minmax(200px,1fr));gap:10px;overflow-x:auto}
+.board{display:grid;grid-template-columns:repeat(4,minmax(190px,1fr));gap:10px;overflow-x:auto}
 .projects{display:grid;grid-template-columns:240px 1fr;gap:14px}
 .plist button{display:flex;justify-content:space-between;width:100%;margin-bottom:4px;text-align:left}
 .plist button.active{border-color:var(--accent);background:var(--accent-weak)}
@@ -310,8 +310,8 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
         <div class="slotkeep"><label for="f_time">Time</label><input id="f_time" name="time" type="time" step="900"></div>
         <div class="slotkeep"><label for="f_status">Status</label>
           <select id="f_status" name="status">
-            <option value="open">Open</option><option value="scheduled">Scheduled</option>
-            <option value="in-progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
+            <option value="open">Open</option>
+            <option value="in-progress">In progress</option><option value="papers">Loading done, pending papers</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
           </select></div>
         <div class="wide"><label for="f_notes">Free text</label><textarea id="f_notes" name="notes" rows="3" maxlength="4000"></textarea></div>
         <div class="wide checks">
@@ -390,8 +390,10 @@ td.ck,th.ck{width:30px;text-align:center} td.ck input,th.ck input{width:auto;mar
 "use strict";
 /* ================= Pure logic (no DOM) — covered by the self-test ================= */
 const DJ = (() => {
-  const STATUSES = ["open", "scheduled", "in-progress", "done", "cancelled"];
-  const STATUS_LABEL = { "open": "Open", "scheduled": "Scheduled", "in-progress": "In progress", "done": "Done", "cancelled": "Cancelled" };
+  // "scheduled" was merged into "open" on 2026-11-13 (old rows and old Excel files are read as open)
+  const STATUSES = ["open", "in-progress", "papers", "done", "cancelled"];
+  const STATUS_LABEL = { "open": "Open", "in-progress": "In progress", "papers": "Loading done, pending papers", "done": "Done", "cancelled": "Cancelled" };
+  const loaded = j => j.status === "papers" || j.status === "done"; // the depot work itself is finished
   const closed = j => j.status === "done" || j.status === "cancelled"; // finished one way or the other
   const FIELDS = [
     ["client", "Client"], ["sender", "Sender (Αποστολέας)"], ["receiver", "Receiver (Παραλήπτης)"], ["shippingContainer", "Shipping container"], ["hctContainer", "HCT container"],
@@ -460,7 +462,7 @@ const DJ = (() => {
 
   // Day sheet for the depot: the day's jobs that aren't done, by time, only what the crew needs (never prices).
   function daySheetRows(jobs, day) {
-    return jobs.filter(j => j.date === day && !closed(j))
+    return jobs.filter(j => j.date === day && !closed(j) && !loaded(j))
       .sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : (a.time || "99") > (b.time || "99") ? 1 : 0)
       .map(j => ({ time: j.time || "", client: j.client || "", shippingContainer: j.shippingContainer || "", hctContainer: j.hctContainer || "", cargoType: j.cargoType || "", truckPlate: j.truckPlate || "" }));
   }
@@ -497,7 +499,7 @@ const DJ = (() => {
     if (!n || !/^\d{4}-\d{2}-\d{2}$/.test(p.from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(p.to || "") || p.to < p.from) return out;
     for (let d = p.from; d <= p.to && out.length <= 1000; d = addDays(d, 1)) {
       if (!p.days[(parseYmd(d).getDay() + 6) % 7]) continue;
-      for (let i = 1; i <= n; i++) out.push(cleanJob({ project: p.project, client: p.client, cargoType: p.cargoType, transporter: p.transporter, date: d, status: "scheduled", notes: "Planned load " + i + " of " + n, slot: true }));
+      for (let i = 1; i <= n; i++) out.push(cleanJob({ project: p.project, client: p.client, cargoType: p.cargoType, transporter: p.transporter, date: d, status: "open", notes: "Planned load " + i + " of " + n, slot: true }));
     }
     return out;
   }
@@ -568,10 +570,10 @@ const DJ = (() => {
       const t = excelTime(raw.time); if (t.bad) warn.push("time “" + raw.time + "” not understood, left empty"); j.time = t.v;
       for (const k of ["weight", "pieces", "price"]) { const n = excelNum(raw[k]); if (n.bad) warn.push(LABEL[k] + " “" + raw[k] + "” is not a number, left empty"); j[k] = n.v; }
       if (!j.project) j.project = out.project;
-      const st = String(raw.status == null ? "" : raw.status).trim().toLowerCase().replace(/[\s_]+/g, "-");
-      const sk = STATUSES.find(x => x === st || STATUS_LABEL[x].toLowerCase().replace(/\s+/g, "-") === st);
+      const st = String(raw.status == null ? "" : raw.status).trim().toLowerCase().replace(/[\s_,]+/g, "-");
+      const sk = st === "scheduled" ? "open" : st === "pending-papers" || st === "loading-done" ? "papers" : STATUSES.find(x => x === st || STATUS_LABEL[x].toLowerCase().replace(/[\s,]+/g, "-") === st);
       if (st && !sk) warn.push("status “" + raw.status + "” not understood");
-      j.status = sk || (j.date ? "scheduled" : "open");
+      j.status = sk || "open";
       j.invoiceNo = raw.invoiceNo == null ? "" : String(raw.invoiceNo).trim();
       if (j.invoiceNo) j.invoicedOn = new Date().toISOString().slice(0, 10);
       const c = cleanJob(j);
@@ -645,7 +647,7 @@ const DJ = (() => {
     for (const k of ["weight", "pieces"]) out[k] = out[k] === "" || isNaN(+out[k]) ? "" : String(Math.max(0, Math.round(+out[k])));
     if (out.date && !/^\d{4}-\d{2}-\d{2}$/.test(out.date)) out.date = "";
     out.time = /^([01]\d|2[0-3]):[0-5]\d/.test(out.time) ? out.time.slice(0, 5) : "";
-    out.status = STATUSES.includes(j.status) ? j.status : "open";
+    out.status = STATUSES.includes(j.status) ? j.status : "open"; // also turns the old "scheduled" into open
     out.slot = !!j.slot;
     out.invoiceNo = String(j.invoiceNo == null ? "" : j.invoiceNo).trim().slice(0, 60);
     out.invoicedOn = /^\d{4}-\d{2}-\d{2}$/.test(j.invoicedOn || "") ? j.invoicedOn : "";
@@ -660,11 +662,11 @@ const DJ = (() => {
 
   function title(j) { return j.slot ? "Planned load" + (j.project ? " · " + j.project : "") : j.shippingContainer || j.hctContainer || j.ref || j.client || "(untitled job)"; }
   // Jobs of the slot's project that can fill it: real (not planned) jobs that aren't done yet
-  function slotCandidates(jobs, slot) { return jobs.filter(j => !j.slot && !closed(j) && j.project === slot.project).sort((a, b) => (a.date ? 1 : 0) - (b.date ? 1 : 0) || String(a.ref || a.shippingContainer).localeCompare(String(b.ref || b.shippingContainer), undefined, { numeric: true })); }
+  function slotCandidates(jobs, slot) { return jobs.filter(j => !j.slot && !closed(j) && !loaded(j) && j.project === slot.project).sort((a, b) => (a.date ? 1 : 0) - (b.date ? 1 : 0) || String(a.ref || a.shippingContainer).localeCompare(String(b.ref || b.shippingContainer), undefined, { numeric: true })); }
   function unitLabel(j) { return [j.shippingContainer, j.hctContainer && "HCT " + j.hctContainer, j.ref && "Ref " + j.ref].filter(Boolean).join(" · ") || j.client || "(job without container or ref)"; }
   // The real job takes the slot's day, time and status; anything typed on the slot fills its empty fields
   function fillSlot(slot, unit) {
-    const out = Object.assign({}, unit, { date: slot.date, time: slot.time || unit.time, status: slot.status === "open" ? "scheduled" : slot.status, slot: false });
+    const out = Object.assign({}, unit, { date: slot.date, time: slot.time || unit.time, status: slot.status, slot: false });
     for (const [k] of FIELDS) if (k !== "notes" && k !== "price" && !String(out[k] || "").trim() && String(slot[k] || "").trim()) out[k] = slot[k];
     return cleanJob(Object.assign(out, { id: unit.id, created: unit.created, updated: unit.updated, createdBy: unit.createdBy, updatedBy: unit.updatedBy, checklist: unit.checklist.concat(slot.checklist) }));
   }
@@ -679,14 +681,14 @@ const DJ = (() => {
   function mailtoUrl(m) { return "mailto:" + m.to + "?subject=" + encodeURIComponent(m.subject) + "&body=" + encodeURIComponent(m.body.replace(/\r?\n/g, "\r\n")); }
   // Cancel a whole project: unfinished jobs become Cancelled, its empty planned loads go; Reopen undoes the first part
   function cancelPlan(jobs, project) {
-    const mine = jobs.filter(j => j.project.trim() === project && !closed(j));
+    const mine = jobs.filter(j => j.project.trim() === project && !closed(j) && !loaded(j)); // loaded jobs still need their papers
     return { cancel: mine.filter(j => !j.slot).map(j => j.id), drop: mine.filter(j => j.slot).map(j => j.id) };
   }
-  function reopenStatus(j) { return j.date ? "scheduled" : "open"; }
+  function reopenStatus() { return "open"; }
   // The reverse: a load that won't happen goes back to the project's list (no date, Open) and its day gets an empty slot again
   function unfillSlot(job) {
     return { unit: cleanJob(Object.assign({}, job, { date: "", time: "", status: "open" })),
-      slot: cleanJob({ project: job.project, client: job.client, cargoType: job.cargoType, transporter: job.transporter, date: job.date, time: job.time, status: "scheduled", notes: "Planned load", slot: true }) };
+      slot: cleanJob({ project: job.project, client: job.client, cargoType: job.cargoType, transporter: job.transporter, date: job.date, time: job.time, status: "open", notes: "Planned load", slot: true }) };
   }
 
   /* ---- Minimal .xlsx writer: stored (uncompressed) ZIP, inline strings. No libraries, no network. ---- */
@@ -813,7 +815,7 @@ const DJ = (() => {
     const j = { id: r.id };
     for (const k in COLS) j[k] = r[COLS[k]] == null ? "" : r[COLS[k]];
     j.time = j.time ? String(j.time).slice(0, 5) : "";
-    j.status = r.status; j.checklist = r.checklist; j.slot = !!r.is_slot;
+    j.status = STATUSES.includes(r.status) ? r.status : "open"; j.checklist = r.checklist; j.slot = !!r.is_slot;
     j.price = priceRow && priceRow.price != null ? priceRow.price : "";
     j.invoiceNo = invRow ? invRow.invoice_no : ""; j.invoicedOn = invRow ? invRow.invoiced_on : "";
     j.created = r.created_at; j.updated = r.updated_at; j.createdBy = r.created_by; j.updatedBy = r.updated_by;
@@ -826,7 +828,7 @@ const DJ = (() => {
     return Object.keys(names).filter(k => k in newRow && JSON.stringify(oldRow[k]) !== JSON.stringify(newRow[k])).map(k => names[k]);
   }
 
-  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot, closed, cancelPlan, reopenStatus, needsDoneMail, doneMail, mailtoUrl, DEPOT_MAIL };
+  return { toRow, fromRow, changedFields, WX_PLACES, wxUrl, wxParse, wxIcon, wxAlert, STATUSES, STATUS_LABEL, FIELDS, esc, containerWarning, normContainer, ymd, parseYmd, mondayOf, addDays, matches, cleanJob, newId, title, crc32, zip, xlsx, jobsToRows, colName, fileType, fileProblem, storageName, fmtSize, FILE_MAX, daySheetRows, NONE, applyFilters, sortJobs, templateRows, excelDate, excelTime, excelNum, parseImport, readXlsx, planLoads, slotCandidates, unitLabel, fillSlot, unfillSlot, closed, cancelPlan, reopenStatus, loaded, needsDoneMail, doneMail, mailtoUrl, DEPOT_MAIL };
 })();
 
 /* ================= Supabase ================= */
@@ -1052,7 +1054,7 @@ function hl(text, q) {
   return out;
 }
 function fmtDate(s) { if (!s) return "No date"; const d = DJ.parseYmd(s); return d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" }); }
-function pill(st) { return '<span class="pill p-' + st + '">' + DJ.STATUS_LABEL[st] + '</span>'; }
+function pill(st) { return '<span class="pill p-' + st + '"' + (st === "papers" ? ' title="Loading done, pending papers"' : '') + '>' + (st === "papers" ? "Pending papers" : DJ.STATUS_LABEL[st]) + '</span>'; }
 function progress(j) {
   const nf = (files[j.id] || []).length, clip = nf ? ' <span class="prog" title="Attachments">📎 ' + nf + '</span>' : "";
   const n = j.checklist.length; if (!n) return clip; const d = j.checklist.filter(c => c.done).length; return '<span class="prog">☑ ' + d + '/' + n + '</span>' + clip;
@@ -1276,7 +1278,6 @@ function wireTable() {
 async function saveCell(el) {
   const j = jobs.find(x => x.id === el.dataset.id), k = el.dataset.ek; if (!j) return;
   const next = DJ.cleanJob(Object.assign({}, j, { [k]: el.value }));
-  if (k === "date" && next.date && j.status === "open") next.status = "scheduled";
   if (next[k] === j[k] && next.status === j.status) { el.value = j[k]; return; }
   el.disabled = true;
   try {
@@ -1323,7 +1324,6 @@ function renderWeek() {
     job.date = el.dataset.day;
     // "Other" row keeps a time outside working hours, clears one inside them
     if (el.dataset.time) job.time = el.dataset.time; else if (slotOf(job)) job.time = "";
-    if (job.status === "open") job.status = "scheduled";
   });
 }
 
@@ -1362,7 +1362,7 @@ function renderProjects() {
     (names.length ? names.map(n => '<button data-p="' + esc(n) + '" class="' + (n === sel ? 'active' : '') + (archived.has(n) ? ' archived' : '') + '"><span>' + (archived.has(n) ? '🗄 ' : '') + esc(n || "(no project)") + '</span><span style="color:var(--muted)" title="open / total">' + count(n) + '</span></button>').join("") : '<div class="empty">No projects yet. Type a project name on a job.</div>') +
     '</div><div>' + (sel !== null ? '<div class="toolbar"><h2>' + esc(sel || "(no project)") + '</h2><span style="color:var(--muted)">' + list.length + ' job' + (list.length === 1 ? '' : 's') + '</span>' + editToggle("projects") + '<div class="spacer"></div>' +
       (sel && plan.cancel.length + plan.drop.length ? '<button id="cancelProj" class="danger" title="Mark every unfinished job of this project Cancelled and remove its empty planned loads">Cancel project</button>' : '') +
-      (nCancelled ? '<button id="reopenProj" title="Set the cancelled jobs of this project back to Open / Scheduled">Reopen cancelled (' + nCancelled + ')</button>' : '') +
+      (nCancelled ? '<button id="reopenProj" title="Set the cancelled jobs of this project back to Open">Reopen cancelled (' + nCancelled + ')</button>' : '') +
       (sel && seesPrices() ? (archived.has(sel) ? '<button id="archProj" title="Show this project in the lists again">Unarchive</button>' : '<button id="archProj" title="Finished: hide this project from the project list, suggestions and the side panel. Nothing is deleted.">Archive</button>') : '') +
       '<button id="exportProj" class="primary">Export to Excel</button></div>' +
       (sel && archived.has(sel) ? '<p class="archnote">🗄 Archived project. Its jobs are kept and still show in All jobs, Week and Today.</p>' : '') +
@@ -1399,10 +1399,9 @@ async function cancelProject(name, plan) {
 }
 async function reopenProject(name) {
   const list = jobs.filter(j => j.project.trim() === name && j.status === "cancelled");
-  if (!list.length || !confirm("Reopen " + list.length + " cancelled job" + (list.length === 1 ? "" : "s") + " of “" + name + "”? Jobs with a date become Scheduled, the rest Open.")) return;
+  if (!list.length || !confirm("Reopen " + list.length + " cancelled job" + (list.length === 1 ? "" : "s") + " of “" + name + "”? They go back to Open.")) return;
   try {
-    await DB.setStatus(list.filter(j => j.date).map(j => j.id), "scheduled");
-    await DB.setStatus(list.filter(j => !j.date).map(j => j.id), "open");
+    await DB.setStatus(list.map(j => j.id), "open");
     toast("Reopened " + list.length + " job" + (list.length === 1 ? "" : "s"));
   } catch (err) { fail("Not reopened", err); }
   await reload();
@@ -1427,7 +1426,7 @@ function planInput() {
 }
 function planSummary() {
   const p = planInput(), list = DJ.planLoads(p), days = new Set(list.map(j => j.date)).size;
-  $("#pl_sum").textContent = list.length ? "Creates " + list.length + " load slot" + (list.length === 1 ? "" : "s") + " (" + days + " day" + (days === 1 ? "" : "s") + " × " + (+p.perDay) + "), status Scheduled" + (list.length > 1000 ? " · too many, max 1000" : "") : "Nothing to create yet: pick the dates and days.";
+  $("#pl_sum").textContent = list.length ? "Creates " + list.length + " load slot" + (list.length === 1 ? "" : "s") + " (" + days + " day" + (days === 1 ? "" : "s") + " × " + (+p.perDay) + ")" + (list.length > 1000 ? " · too many, max 1000" : "") : "Nothing to create yet: pick the dates and days.";
   $("#pl_go").disabled = !list.length || list.length > 1000 || !p.project;
   return list;
 }
@@ -1746,9 +1745,8 @@ function openEditor(id, preset) {
   $("#jobForm").classList.toggle("slotmode", !!(j && j.slot));
   renderSlotBox(j && j.slot ? j : null, "");
   $("#btnDelete").hidden = !j;
-  $("#btnUnslot").hidden = !(j && !j.slot && j.project && j.date && !DJ.closed(j));
+  $("#btnUnslot").hidden = !(j && !j.slot && j.project && j.date && !DJ.closed(j) && !DJ.loaded(j));
   const base = j || Object.assign({ status: "open", date: ui.view === "board" ? ui.boardDate : "", project: ui.view === "projects" ? ui.project : "" }, preset || {});
-  if (!j && preset && preset.date) base.status = "scheduled";
   for (const [k] of DJ.FIELDS) $("#f_" + k).value = base[k] == null ? "" : base[k];
   $("#f_status").value = base.status || "open";
   $("#f_invoiceNo").value = base.invoiceNo || "";
@@ -1995,7 +1993,7 @@ function selfTest() {
   ok("file type by extension", DJ.fileType("Invoice.PDF") === "application/pdf" && DJ.fileType("mail.msg") === "application/vnd.ms-outlook" && DJ.fileType("x.exe") === "" && DJ.fileType("noext") === "");
   ok("file checks", DJ.fileProblem({ name: "a.pdf", size: 10 }) === "" && DJ.fileProblem({ name: "a.html", size: 10 }) !== "" && DJ.fileProblem({ name: "a.pdf", size: DJ.FILE_MAX + 1 }) !== "" && DJ.fileProblem({ name: "a.pdf", size: 0 }) !== "");
   ok("storage name is plain ASCII", DJ.storageName("Τιμολόγιο Μάιος 2026.PDF") === "2026.pdf" && DJ.storageName("C:\\x\\my file (1).xlsx") === "my_file_1.xlsx" && DJ.storageName("ΑΒΓ") === "file" && /^[A-Za-z0-9_.-]+$/.test(DJ.storageName("../../etc/passwd")));
-  const sheet = DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", time: "14:00", client: "B", price: "99" }), DJ.cleanJob({ date: "2026-10-21", time: "09:00", client: "A", status: "scheduled" }), DJ.cleanJob({ date: "2026-10-21", client: "C", status: "done" }), DJ.cleanJob({ date: "2026-10-22", client: "D" })], "2026-10-21");
+  const sheet = DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", time: "14:00", client: "B", price: "99" }), DJ.cleanJob({ date: "2026-10-21", time: "09:00", client: "A", status: "open" }), DJ.cleanJob({ date: "2026-10-21", client: "C", status: "done" }), DJ.cleanJob({ date: "2026-10-22", client: "D" })], "2026-10-21");
   ok("day sheet: that day, not done, by time, no price", sheet.map(r => r.client).join() === "A,B" && !("price" in sheet[0]));
   const fj = [DJ.cleanJob({ client: "A", project: "P1", date: "2026-10-20", status: "done", invoiceNo: "INV-1" }), DJ.cleanJob({ client: "B", date: "2026-10-25" }), DJ.cleanJob({ client: "A", project: "" })];
   ok("filters", DJ.applyFilters(fj, { client: "A" }).length === 2 && DJ.applyFilters(fj, { project: DJ.NONE }).length === 2 && DJ.applyFilters(fj, { status: "active" }).length === 2 &&
@@ -2008,13 +2006,13 @@ function selfTest() {
     ["Ά Client", "mscu 1234566", 46317, 0.375, "21.000", "", "", ""], [], ["B", "MSCU1234567", "22/10/2026", "", "x", "Weird", "Own", "INV-9"], ["", "", "", "", "", "", "", ""]],
     [DJ.cleanJob({ shippingContainer: "MSCU1234566", date: "2026-10-22" })]);
   ok("import: header, top project, values", imp.project === "Resin 2026" && imp.jobs.length === 2 && imp.jobs[0].row === 4 && imp.jobs[0].job.project === "Resin 2026" && imp.jobs[1].job.project === "Own" &&
-    imp.jobs[0].job.shippingContainer === "MSCU1234566" && imp.jobs[0].job.date === "2026-10-22" && imp.jobs[0].job.time === "09:00" && imp.jobs[0].job.weight === "21000" && imp.jobs[0].job.status === "scheduled" && imp.jobs[1].job.invoiceNo === "INV-9");
+    imp.jobs[0].job.shippingContainer === "MSCU1234566" && imp.jobs[0].job.date === "2026-10-22" && imp.jobs[0].job.time === "09:00" && imp.jobs[0].job.weight === "21000" && imp.jobs[0].job.status === "open" && imp.jobs[1].job.invoiceNo === "INV-9");
   ok("import: warnings", imp.jobs[0].warnings.some(w => /duplicate/.test(w)) && imp.jobs[1].warnings.some(w => /Weight/.test(w)) && imp.jobs[1].warnings.some(w => /status/.test(w)) && imp.jobs[1].warnings.some(w => /check digit|Shipping/.test(w)));
   ok("import: no headings", DJ.parseImport([["a", "b"]], []).problems.length === 1);
   const tx = new TextDecoder().decode(DJ.xlsx(DJ.templateRows(true), "T", { bold: [0, 2], freeze: 3, filterRow: null, lists: [{ col: 15, from: 4, to: 9, values: ["Open", "Done"] }] }));
   ok("template xlsx", tx.includes('ySplit="3"') && tx.includes('sqref="P4:P9"') && !tx.includes("autoFilter") && tx.includes("Invoice no"));
   const pl = DJ.planLoads({ project: "P", client: "C", perDay: 3, from: "2026-10-30", to: "2026-11-02", days: [true, true, true, true, true, false, false] });
-  ok("plan loads: weekdays only, n per day", pl.length === 6 && pl[0].date === "2026-10-30" && pl[3].date === "2026-11-02" && pl[2].notes === "Planned load 3 of 3" && pl.every(j => j.status === "scheduled" && j.project === "P"));
+  ok("plan loads: weekdays only, n per day", pl.length === 6 && pl[0].date === "2026-10-30" && pl[3].date === "2026-11-02" && pl[2].notes === "Planned load 3 of 3" && pl.every(j => j.status === "open" && j.project === "P"));
   ok("plan loads: bad input", DJ.planLoads({ perDay: 2, from: "2026-11-02", to: "2026-11-01", days: [true, true, true, true, true, true, true] }).length === 0);
   const unit = DJ.cleanJob({ id: "u1", project: "P", client: "C", shippingContainer: "MSCU1234566", ref: "R1", weight: 500, truckPlate: "" });
   const slot = DJ.cleanJob({ id: "s1", project: "P", date: "2026-10-27", time: "10:00", status: "scheduled", truckPlate: "ikx1", slot: true, notes: "Planned load 1 of 2" });
@@ -2032,6 +2030,9 @@ function selfTest() {
   ok("done e-mail", DJ.needsDoneMail(mj) && DJ.needsDoneMail(DJ.cleanJob({ shippingContainer: "MSCU1234566", hctContainer: "HCTU0000011" })) && !DJ.needsDoneMail(DJ.cleanJob({ hctContainer: "HCTU0000011" })) &&
     mm.to === "depot@hct.gr" && mm.body === "Καλημέρα,\n\nΑυτό είναι αυτοματοποιημένο email.\nΤο κουτί MSCU1234566 εκκενώθηκε.\nΤο έστειλε: George" && mf.subject === "Κουτί MSCU1234566 φορτώθηκε" &&
     DJ.mailtoUrl(mm).startsWith("mailto:depot@hct.gr?subject=") && DJ.mailtoUrl(mm).includes("%0D%0A"));
+  ok("statuses: scheduled merged, pending papers", DJ.cleanJob({ status: "scheduled" }).status === "open" && DJ.fromRow({ id: "x", status: "scheduled", checklist: [] }).status === "open" && DJ.STATUSES.join() === "open,in-progress,papers,done,cancelled" &&
+    DJ.parseImport([["Client", "Status", "Date"], ["C", "Scheduled", ""], ["D", "Loading done, pending papers", ""]], []).jobs.map(x => x.job.status).join() === "open,papers" &&
+    DJ.daySheetRows([DJ.cleanJob({ date: "2026-10-21", status: "papers" })], "2026-10-21").length === 0 && DJ.cancelPlan([DJ.cleanJob({ id: "p", project: "P", status: "papers" })], "P").cancel.length === 0 && DJ.applyFilters([DJ.cleanJob({ status: "papers" })], { status: "active" }).length === 1);
   ok("sender / receiver", DJ.toRow({ sender: "A", receiver: "B" }).sender === "A" && DJ.fromRow({ id: "x", sender: "S", receiver: "R", checklist: [], status: "open" }).receiver === "R" &&
     DJ.parseImport([["Client", "ΑΠΟΣΤΟΛΈΑΣ", "Παραλήπτης", "Date"], ["C", "Snd", "Rcv", ""]], []).jobs[0].job.receiver === "Rcv" && DJ.applyFilters([DJ.cleanJob({ sender: "X" }), DJ.cleanJob({})], { sender: "X" }).length === 1);
   ok("file size label", DJ.fmtSize(500) === "500 B" && DJ.fmtSize(2048) === "2 KB" && DJ.fmtSize(3 * 1048576) === "3.0 MB");

@@ -247,6 +247,14 @@ log('suggestion:', JSON.stringify(db.suggestions.map(x => [x.body, x.status, x.a
   await G.locator('#main .card[data-id=mail1]').click(); await G.selectOption('#f_status', 'done'); await G.click('#btnSave'); await G.waitForTimeout(600);
   log('done from Week editor popup:', await G.isVisible('#mailDlg')); await G.click('#mailDlg [data-mclose]');
 }
+// Today: four columns (Open, In progress, Loading done pending papers, Done); old "scheduled" rows show as Open
+{
+  db.jobs.find(j => j.id === 'mail2').status = 'scheduled';
+  await G.evaluate(() => reload()); await G.click('nav [data-view=board]'); await G.click('#bToday'); await G.waitForTimeout(300);
+  log('today columns:', (await G.locator('.board .col h3 span:first-child').allTextContents()).join(' | '), '| old scheduled row sits in Open:', await G.locator('.col[data-status=open] .card[data-id=mail2]').count());
+  await G.locator('#main .card[data-id=mail2]').dragTo(G.locator('.col[data-status=papers]')); await G.waitForTimeout(600);
+  log('to pending papers:', db.jobs.find(j => j.id === 'mail2').status, '| mail popup:', await G.isVisible('#mailDlg'), '| still in side panel:', await G.locator('#sideList .card[data-id=mail2]').count(), '| pill:', await G.textContent('#main .card[data-id=mail2] .pill'));
+}
 // Column picker on All jobs: hide Sender, move Client first, add Free text; remembered after reload; reset
 await G.click('nav [data-view=all]'); await G.click('#colBtn'); await G.waitForTimeout(150);
 const colRow = name => G.locator('#colList .colrow').filter({ hasText: name });

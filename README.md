@@ -39,10 +39,14 @@ Touch screens have no mouse drag, so tiles drag after a short hold (about a thir
 
 When a job with a shipping-line container is marked Done from Week or Today (drag to Done, or the editor), a popup offers an editable Greek message to depot@hct.gr (Emptied / Filled). **Send** calls the Edge Function `send-depot-mail` (supabase/functions), which sends through the hct.gr Google Workspace (smtp.gmail.com:465) with the secrets `SMTP_USER` / `SMTP_PASS` (an app password, set in the Supabase dashboard, never in code). It only accepts signed-in active users and @hct.gr recipients, and sets Reply-To to the user. Until the secrets exist it answers `not_configured` and the app opens the user's own e-mail app instead.
 
+## Statuses
+
+Open → In progress → Loading done, pending papers (`papers`) → Done, plus Cancelled. Until 2026-11-13 there was also Scheduled; it was merged into Open because the hour slots did not work in practice (the database still accepts `scheduled` from stale browser tabs and the app reads it as Open). A job that is "pending papers" is finished for the depot: it is left off the day sheet, cannot be picked into a planned load, and Cancel project leaves it alone, but it stays in the side panel until it is Done.
+
 ## Projects
 
 - **Notes:** one free-text note per project (table `project_notes`), seen and edited by all users.
-- **Cancel project:** every unfinished job of the project gets status Cancelled and its empty planned loads are removed; Done jobs stay. Cancelled jobs drop off Week, Today, the side panel and the day sheet. **Reopen cancelled** sets them back to Scheduled (with a date) or Open.
+- **Cancel project:** every unfinished job of the project gets status Cancelled and its empty planned loads are removed; Done jobs stay. Cancelled jobs drop off Week, Today, the side panel and the day sheet. **Reopen cancelled** sets them back to Open.
 - **Archive** (office/admin): a finished project disappears from the project list, the project suggestions and the side panel; nothing is deleted and its jobs still show in All jobs, Week and Today. Tick **Show archived** to see it again and **Unarchive** it. Table `archived_projects`.
 - **☰ Columns** (All jobs and Projects, each its own layout): tick which columns show and order them with ▲ ▼; remembered per browser (`ui.cols` in localStorage), Reset to default. Price columns are only offered to office/admin.
 - **✎ Edit in table** (All jobs and Projects): cells become inputs and each one saves when you leave it, with the same conflict check as the editor. Planned loads only allow date, time and status there.
